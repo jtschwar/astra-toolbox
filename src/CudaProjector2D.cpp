@@ -41,12 +41,12 @@ CCudaProjector2D::CCudaProjector2D()
 
 //----------------------------------------------------------------------------------------
 // Constructor
-CCudaProjector2D::CCudaProjector2D(CParallelProjectionGeometry2D* _pProjectionGeometry,
-                                   CVolumeGeometry2D* _pReconstructionGeometry)
+CCudaProjector2D::CCudaProjector2D(const CParallelProjectionGeometry2D& _pProjectionGeometry,
+                                   const CVolumeGeometry2D& _pReconstructionGeometry)
 {
     _clear();
-    m_pProjectionGeometry = _pProjectionGeometry->clone();
-    m_pVolumeGeometry = _pReconstructionGeometry->clone();
+    m_pProjectionGeometry = _pProjectionGeometry.clone();
+    m_pVolumeGeometry = _pReconstructionGeometry.clone();
     m_bIsInitialized = true;
 }
 

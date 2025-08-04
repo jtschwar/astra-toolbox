@@ -109,7 +109,7 @@ bool CCudaSartAlgorithm::initialize(CProjector2D* _pProjector,
 void CCudaSartAlgorithm::updateProjOrder(string& projOrder)
 {
     // projection order
-    int projectionCount = m_pSinogram->getGeometry()->getProjectionAngleCount();
+    int projectionCount = m_pSinogram->getGeometry().getProjectionAngleCount();
     int* projectionOrder = NULL;
     
     if (projOrder == "sequential") {
