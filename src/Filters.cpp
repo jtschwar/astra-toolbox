@@ -405,6 +405,7 @@ float *genFilter(const SFilterConfig &_cfg,
 		default:
 		{
 			ASTRA_ERROR("Cannot serve requested filter");
+			return NULL;
 		}
 	}
 
@@ -485,22 +486,21 @@ E_FBPFILTER convertStringToFilter(const std::string &_filterType)
 
 SFilterConfig getFilterConfigForAlgorithm(const Config& _cfg, CAlgorithm *_alg)
 {
-	ConfigStackCheck<CAlgorithm> CC("getFilterConfig", _alg, _cfg);
+	ConfigReader<CAlgorithm> CR("getFilterConfig", _alg, _cfg);
 
 	SFilterConfig c;
 
-	XMLNode node;
-
 	// filter type
 	const char *nodeName = "FilterType";
-	node = _cfg.self.getSingleNode(nodeName);
-	if (_cfg.self.hasOption(nodeName)) {
-		c.m_eType = convertStringToFilter(_cfg.self.getOption(nodeName));
-		CC.markOptionParsed(nodeName);
-	} else if (node) {
+	if (CR.hasOption(nodeName)) {
+		std::string s;
+		CR.getOptionString(nodeName, s, "");
+		c.m_eType = convertStringToFilter(s);
+	} else if (CR.has(nodeName)) {
 		// Fallback: check cfg.FilterType (instead of cfg.option.FilterType)
-		c.m_eType = convertStringToFilter(node.getContent());
-		CC.markNodeParsed(nodeName);
+		std::string s;
+		CR.getString(nodeName, s, "");
+		c.m_eType = convertStringToFilter(s);
 	} else {
 		c.m_eType = FILTER_RAMLAK;
 	}
@@ -513,17 +513,17 @@ SFilterConfig getFilterConfigForAlgorithm(const Config& _cfg, CAlgorithm *_alg)
 	case FILTER_SINOGRAM:
 	case FILTER_RPROJECTION:
 	case FILTER_RSINOGRAM:
-		node = _cfg.self.getSingleNode(nodeName);
-		try {
-			if (_cfg.self.hasOption(nodeName)) {
-				id = _cfg.self.getOptionInt(nodeName);
-				CC.markOptionParsed(nodeName);
-			} else if (node) {
-				id = node.getContentInt();
-				CC.markNodeParsed(nodeName);
+		{
+			bool ok = true;
+			if (CR.hasOption(nodeName)) {
+				ok &= CR.getOptionID(nodeName, id);
+			} else if (CR.has(nodeName)) {
+				ok &= CR.getID(nodeName, id);
 			}
-		} catch (const astra::StringUtil::bad_cast &e) {
-			ASTRA_ERROR("%s is not a valid id", nodeName);
+			if (!ok) {
+				c.m_eType = FILTER_ERROR;
+				return c;
+			}
 		}
 		break;
 	default:
@@ -532,15 +532,15 @@ SFilterConfig getFilterConfigForAlgorithm(const Config& _cfg, CAlgorithm *_alg)
 
 	if (id != -1) {
 		const CFloat32ProjectionData2D * pFilterData = dynamic_cast<CFloat32ProjectionData2D*>(CData2DManager::getSingleton().get(id));
-		c.m_iCustomFilterWidth = pFilterData->getGeometry()->getDetectorCount();
-		c.m_iCustomFilterHeight = pFilterData->getGeometry()->getProjectionAngleCount();
+		c.m_iCustomFilterWidth = pFilterData->getGeometry().getDetectorCount();
+		c.m_iCustomFilterHeight = pFilterData->getGeometry().getProjectionAngleCount();
 
-		c.m_pfCustomFilter = new float[c.m_iCustomFilterWidth * c.m_iCustomFilterHeight];
-		memcpy(c.m_pfCustomFilter, pFilterData->getDataConst(), sizeof(float) * c.m_iCustomFilterWidth * c.m_iCustomFilterHeight);
+		c.m_pfCustomFilter.resize(c.m_iCustomFilterWidth * c.m_iCustomFilterHeight);
+		memcpy(&c.m_pfCustomFilter[0], pFilterData->getDataConst(), sizeof(float) * c.m_iCustomFilterWidth * c.m_iCustomFilterHeight);
 	} else {
 		c.m_iCustomFilterWidth = 0;
 		c.m_iCustomFilterHeight = 0;
-		c.m_pfCustomFilter = NULL;
+		c.m_pfCustomFilter.clear();
 	}
 
 	// filter parameter
@@ -551,17 +551,17 @@ SFilterConfig getFilterConfigForAlgorithm(const Config& _cfg, CAlgorithm *_alg)
 	case FILTER_GAUSSIAN:
 	case FILTER_BLACKMAN:
 	case FILTER_KAISER:
-		try {
-			node = _cfg.self.getSingleNode(nodeName);
-			if (_cfg.self.hasOption(nodeName)) {
-				c.m_fParameter = _cfg.self.getOptionNumerical(nodeName);
-				CC.markOptionParsed(nodeName);
-			} else if (node) {
-				c.m_fParameter = node.getContentNumerical();
-				CC.markNodeParsed(nodeName);
+		{
+			bool ok = true;
+			if (CR.hasOption(nodeName)) {
+				ok &= CR.getOptionNumerical(nodeName, c.m_fParameter, c.m_fParameter);
+			} else if (CR.has(nodeName)) {
+				ok &= CR.getRequiredNumerical(nodeName, c.m_fParameter);
 			}
-		} catch (const astra::StringUtil::bad_cast &e) {
-			ASTRA_ERROR("%s must be numerical", nodeName);
+			if (!ok) {
+				c.m_eType = FILTER_ERROR;
+				return c;
+			}
 		}
 		break;
 	default:
@@ -581,17 +581,17 @@ SFilterConfig getFilterConfigForAlgorithm(const Config& _cfg, CAlgorithm *_alg)
 	case FILTER_ERROR:
 		break;
 	default:
-		try {
-			node = _cfg.self.getSingleNode(nodeName);
-			if (_cfg.self.hasOption(nodeName)) {
-				c.m_fD = _cfg.self.getOptionNumerical(nodeName);
-				CC.markOptionParsed(nodeName);
-			} else if (node) {
-				c.m_fD = node.getContentNumerical();
-				CC.markNodeParsed(nodeName);
+		{
+			bool ok = true;
+			if (CR.hasOption(nodeName)) {
+				ok &= CR.getOptionNumerical(nodeName, c.m_fD, c.m_fD);
+			} else if (CR.has(nodeName)) {
+				ok &= CR.getRequiredNumerical(nodeName, c.m_fD);
 			}
-		} catch (const astra::StringUtil::bad_cast &e) {
-			ASTRA_ERROR("%s must be numerical", nodeName);
+			if (!ok) {
+				c.m_eType = FILTER_ERROR;
+				return c;
+			}
 		}
 		break;
 	}

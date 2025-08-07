@@ -28,6 +28,7 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include "astra/ParallelProjectionGeometry2D.h"
 
 #include "astra/GeometryUtil2D.h"
+#include "astra/XMLConfig.h"
 
 #include <cstring>
 
@@ -97,8 +98,7 @@ CParallelProjectionGeometry2D::~CParallelProjectionGeometry2D()
 // Initialize - Config
 bool CParallelProjectionGeometry2D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CProjectionGeometry2D> CC("ParallelProjectionGeometry2D", this, _cfg);	
+	ConfigReader<CProjectionGeometry2D> CR("ParallelProjectionGeometry2D", this, _cfg);	
 
 
 	// initialization of parent class
@@ -129,19 +129,17 @@ bool CParallelProjectionGeometry2D::initialize(int _iProjectionAngleCount,
 
 //----------------------------------------------------------------------------------------
 // Clone
-CProjectionGeometry2D* CParallelProjectionGeometry2D::clone()
+CProjectionGeometry2D* CParallelProjectionGeometry2D::clone() const
 {
 	return new CParallelProjectionGeometry2D(*this);
 }
 
 //----------------------------------------------------------------------------------------
 // is equal
-bool CParallelProjectionGeometry2D::isEqual(CProjectionGeometry2D* _pGeom2) const
+bool CParallelProjectionGeometry2D::isEqual(const CProjectionGeometry2D &_pGeom2) const
 {
-	if (_pGeom2 == NULL) return false;
-
 	// try to cast argument to CParallelProjectionGeometry2D
-	CParallelProjectionGeometry2D* pGeom2 = dynamic_cast<CParallelProjectionGeometry2D*>(_pGeom2);
+	const CParallelProjectionGeometry2D* pGeom2 = dynamic_cast<const CParallelProjectionGeometry2D*>(&_pGeom2);
 	if (pGeom2 == NULL) return false;
 
 	// both objects must be initialized
@@ -170,27 +168,13 @@ bool CParallelProjectionGeometry2D::isOfType(const std::string& _sType)
 // Get the configuration object
 Config* CParallelProjectionGeometry2D::getConfiguration() const 
 {
-	Config* cfg = new Config();
-	cfg->initialize("ProjectionGeometry2D");
-	cfg->self.addAttribute("type", "parallel");
-	cfg->self.addChildNode("DetectorCount", getDetectorCount());
-	cfg->self.addChildNode("DetectorWidth", getDetectorWidth());
-	cfg->self.addChildNode("ProjectionAngles", m_pfProjectionAngles, m_iProjectionAngleCount);
-	return cfg;
-}
+	ConfigWriter CW("ProjectionGeometry2D", "parallel");
 
-//----------------------------------------------------------------------------------------
-CVector3D CParallelProjectionGeometry2D::getProjectionDirection(int _iProjectionIndex, int _iDetectorIndex /* = 0 */)
-{
-	CVector3D vOutput;
+	CW.addInt("DetectorCount", getDetectorCount());
+	CW.addNumerical("DetectorWidth", getDetectorWidth());
+	CW.addNumericalArray("ProjectionAngles", m_pfProjectionAngles, m_iProjectionAngleCount);
 
-	float32 fProjectionAngle = getProjectionAngle(_iProjectionIndex);
-
-	vOutput.setX(cosf(fProjectionAngle));
-	vOutput.setY(sinf(fProjectionAngle));
-	vOutput.setZ(0.0f);
-
-	return vOutput;
+	return CW.getConfig();
 }
 
 //----------------------------------------------------------------------------------------

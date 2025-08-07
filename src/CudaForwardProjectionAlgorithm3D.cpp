@@ -47,9 +47,6 @@ using namespace std;
 
 namespace astra {
 
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CCudaForwardProjectionAlgorithm3D::type = "FP3D_CUDA";
-
 //----------------------------------------------------------------------------------------
 // Constructor
 CCudaForwardProjectionAlgorithm3D::CCudaForwardProjectionAlgorithm3D() 
@@ -91,58 +88,42 @@ void CCudaForwardProjectionAlgorithm3D::initializeFromProjector()
 // Initialize - Config
 bool CCudaForwardProjectionAlgorithm3D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("CudaForwardProjectionAlgorithm3D", this, _cfg);	
+	ConfigReader<CAlgorithm> CR("CudaForwardProjectionAlgorithm3D", this, _cfg);
 
-	XMLNode node;
-	int id;
-
-	// sinogram data
-	node = _cfg.self.getSingleNode("ProjectionDataId");
-	ASTRA_CONFIG_CHECK(node, "CudaForwardProjection3D", "No ProjectionDataId tag specified.");
-	id = StringUtil::stringToInt(node.getContent(), -1);
-	m_pProjections = dynamic_cast<CFloat32ProjectionData3D*>(CData3DManager::getSingleton().get(id));
-	CC.markNodeParsed("ProjectionDataId");
-
-	// reconstruction data
-	node = _cfg.self.getSingleNode("VolumeDataId");
-	ASTRA_CONFIG_CHECK(node, "CudaForwardProjection3D", "No VolumeDataId tag specified.");
-	id = StringUtil::stringToInt(node.getContent(), -1);
-	m_pVolume = dynamic_cast<CFloat32VolumeData3D*>(CData3DManager::getSingleton().get(id));
-	CC.markNodeParsed("VolumeDataId");
-
-	// optional: projector
-	node = _cfg.self.getSingleNode("ProjectorId");
+	// projector
 	m_pProjector = 0;
-	if (node) {
-		id = StringUtil::stringToInt(node.getContent(), -1);
+	int id = -1;
+	if (CR.has("ProjectorId")) {
+		CR.getID("ProjectorId", id);
 		m_pProjector = CProjector3DManager::getSingleton().get(id);
 		if (!m_pProjector) {
-			// Report this explicitly since projector is optional
-			ASTRA_ERROR("ProjectorId is not a valid id");
+			ASTRA_WARN("Optional parameter ProjectorId is not a valid id");
 		}
 	}
-	CC.markNodeParsed("ProjectorId");
+
+	bool ok = true;
+
+	// sinogram data
+	ok &= CR.getRequiredID("ProjectionDataId", id);
+	m_pProjections = dynamic_cast<CFloat32ProjectionData3D*>(CData3DManager::getSingleton().get(id));
+
+	// reconstruction data
+	ok &= CR.getRequiredID("VolumeDataId", id);
+	m_pVolume = dynamic_cast<CFloat32VolumeData3D*>(CData3DManager::getSingleton().get(id));
+
+	if (!ok)
+		return false;
 
 	initializeFromProjector();
 
 	// Deprecated options
-	try {
-		m_iDetectorSuperSampling = _cfg.self.getOptionInt("DetectorSuperSampling", m_iDetectorSuperSampling);
-	} catch (const StringUtil::bad_cast &e) {
-		ASTRA_CONFIG_CHECK(false, "CudaForwardProjection3D", "Supersampling options must be integers.");
-	}
-	CC.markOptionParsed("DetectorSuperSampling");
-	// GPU number
-	try {
-		m_iGPUIndex = _cfg.self.getOptionInt("GPUindex", -1);
-		m_iGPUIndex = _cfg.self.getOptionInt("GPUIndex", m_iGPUIndex);
-	} catch (const StringUtil::bad_cast &e) {
-		ASTRA_CONFIG_CHECK(false, "CudaForwardProjection3D", "GPUIndex must be an integer.");
-	}
-	CC.markOptionParsed("GPUIndex");
-	if (!_cfg.self.hasOption("GPUIndex"))
-		CC.markOptionParsed("GPUindex");
+	ok &= CR.getOptionInt("DetectorSuperSampling", m_iDetectorSuperSampling, m_iDetectorSuperSampling);
+	if (CR.hasOption("GPUIndex"))
+		ok &= CR.getOptionInt("GPUIndex", m_iGPUIndex, -1);
+	else
+		ok &= CR.getOptionInt("GPUindex", m_iGPUIndex, -1);
+	if (!ok)
+		return false;
 
 	// success
 	m_bIsInitialized = check();
@@ -232,89 +213,16 @@ void CCudaForwardProjectionAlgorithm3D::setGPUIndex(int _iGPUIndex)
 	m_iGPUIndex = _iGPUIndex;
 }
 
-//---------------------------------------------------------------------------------------
-// Information - All
-map<string,boost::any> CCudaForwardProjectionAlgorithm3D::getInformation()
-{
-	map<string,boost::any> res;
-	res["ProjectionGeometry"] = getInformation("ProjectionGeometry");
-	res["VolumeGeometry"] = getInformation("VolumeGeometry");
-	res["ProjectionDataId"] = getInformation("ProjectionDataId");
-	res["VolumeDataId"] = getInformation("VolumeDataId");
-	res["GPUindex"] = getInformation("GPUindex");
-	res["GPUindex"] = getInformation("GPUindex");
-	res["DetectorSuperSampling"] = getInformation("DetectorSuperSampling");
-	return mergeMap<string,boost::any>(CAlgorithm::getInformation(), res);
-}
-
-//---------------------------------------------------------------------------------------
-// Information - Specific
-boost::any CCudaForwardProjectionAlgorithm3D::getInformation(std::string _sIdentifier)
-{
-	// TODO: store these so we can return them?
-	if (_sIdentifier == "ProjectionGeometry")	{ return string("not implemented"); }
-	if (_sIdentifier == "VolumeGeometry")	{ return string("not implemented"); }
-	if (_sIdentifier == "GPUindex")	{ return m_iGPUIndex; }
-	if (_sIdentifier == "DetectorSuperSampling")	{ return m_iDetectorSuperSampling; }
-
-	if (_sIdentifier == "ProjectionDataId") {
-		int iIndex = CData3DManager::getSingleton().getIndex(m_pProjections);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	}
-	if (_sIdentifier == "VolumeDataId") {
-		int iIndex = CData3DManager::getSingleton().getIndex(m_pVolume);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	}
-	return CAlgorithm::getInformation(_sIdentifier);
-}
-
 //----------------------------------------------------------------------------------------
 // Run
-void CCudaForwardProjectionAlgorithm3D::run(int)
+bool CCudaForwardProjectionAlgorithm3D::run(int)
 {
 	// check initialized
 	assert(m_bIsInitialized);
 
-#if 1
 	CCompositeGeometryManager cgm;
 
-	cgm.doFP(m_pProjector, m_pVolume, m_pProjections);
-
-#else
-	const CProjectionGeometry3D* projgeom = m_pProjections->getGeometry();
-	const CVolumeGeometry3D& volgeom = *m_pVolume->getGeometry();
-
-	Cuda3DProjectionKernel projKernel = ker3d_default;
-	if (m_pProjector) {
-		CCudaProjector3D* projector = dynamic_cast<CCudaProjector3D*>(m_pProjector);
-		projKernel = projector->getProjectionKernel();
-	}
-
-#if 0
-	// Debugging code that gives the coordinates of the corners of the volume
-	// projected on the detector.
-	{
-		float fX[] = { volgeom.getWindowMinX(), volgeom.getWindowMaxX() };
-		float fY[] = { volgeom.getWindowMinY(), volgeom.getWindowMaxY() };
-		float fZ[] = { volgeom.getWindowMinZ(), volgeom.getWindowMaxZ() };
-
-		for (int a = 0; a < projgeom->getProjectionCount(); ++a)
-		for (int i = 0; i < 2; ++i)
-		for (int j = 0; j < 2; ++j)
-		for (int k = 0; k < 2; ++k) {
-			float fU, fV;
-			projgeom->projectPoint(fX[i], fY[j], fZ[k], a, fU, fV);
-			ASTRA_DEBUG("%3d %c1,%c1,%c1 -> %12f %12f", a, i ? ' ' : '-', j ? ' ' : '-', k ? ' ' : '-', fU, fV);
-		}
-	}
-#endif
-
-	astraCudaFP(m_pVolume->getDataConst(), m_pProjections->getData(),
-	            &volgeom, projgeom,
-	            m_iGPUIndex, m_iDetectorSuperSampling, projKernel);
-#endif
+	return cgm.doFP(m_pProjector, m_pVolume, m_pProjections);
 }
 
 

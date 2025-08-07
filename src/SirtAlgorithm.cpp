@@ -30,14 +30,13 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include "astra/AstraObjectManager.h"
 #include "astra/DataProjectorPolicies.h"
 
+#include "astra/Logging.h"
+
 using namespace std;
 
 namespace astra {
 
 #include "astra/Projector2DImpl.inl"
-
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CSirtAlgorithm::type = "SIRT";
 
 //----------------------------------------------------------------------------------------
 // Constructor
@@ -116,8 +115,7 @@ bool CSirtAlgorithm::_check()
 // Initialize - Config
 bool CSirtAlgorithm::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("SirtAlgorithm", this, _cfg);
+	ConfigReader<CAlgorithm> CR("SirtAlgorithm", this, _cfg);
 
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -129,8 +127,12 @@ bool CSirtAlgorithm::initialize(const Config& _cfg)
 		return false;
 	}
 
-	m_fLambda = _cfg.self.getOptionNumerical("Relaxation", 1.0f);
-	CC.markOptionParsed("Relaxation");
+	bool ok = true;
+
+	ok &= CR.getOptionNumerical("Relaxation", m_fLambda, 1.0f);
+
+	if (!ok)
+		return false;
 
 	// init data objects and data projectors
 	_init();
@@ -177,24 +179,9 @@ void CSirtAlgorithm::_init()
 	m_pTmpVolume = new CFloat32VolumeData2D(m_pProjector->getVolumeGeometry());
 }
 
-//---------------------------------------------------------------------------------------
-// Information - All
-map<string,boost::any> CSirtAlgorithm::getInformation() 
-{
-	map<string, boost::any> res;
-	return mergeMap<string,boost::any>(CReconstructionAlgorithm2D::getInformation(), res);
-};
-
-//---------------------------------------------------------------------------------------
-// Information - Specific
-boost::any CSirtAlgorithm::getInformation(std::string _sIdentifier) 
-{
-	return CAlgorithm::getInformation(_sIdentifier);
-};
-
 //----------------------------------------------------------------------------------------
 // Iterate
-void CSirtAlgorithm::run(int _iNrIterations)
+bool CSirtAlgorithm::run(int _iNrIterations)
 {
 	// check initialized
 	ASTRA_ASSERT(m_bIsInitialized);
@@ -246,7 +233,7 @@ void CSirtAlgorithm::run(int _iNrIterations)
 	pFirstForwardProjector->project();
 
 	float32* pfT = m_pTotalPixelWeight->getData();
-	for (int i = 0; i < m_pTotalPixelWeight->getSize(); ++i) {
+	for (size_t i = 0; i < m_pTotalPixelWeight->getSize(); ++i) {
 		float32 x = pfT[i];
 		if (x < -eps || x > eps)
 			x = 1.0f / x;
@@ -255,7 +242,7 @@ void CSirtAlgorithm::run(int _iNrIterations)
 		pfT[i] = m_fLambda * x;
 	}
 	pfT = m_pTotalRayLength->getData();
-	for (int i = 0; i < m_pTotalRayLength->getSize(); ++i) {
+	for (size_t i = 0; i < m_pTotalRayLength->getSize(); ++i) {
 		float32 x = pfT[i];
 		if (x < -eps || x > eps)
 			x = 1.0f / x;
@@ -317,6 +304,8 @@ void CSirtAlgorithm::run(int _iNrIterations)
 	ASTRA_DELETE(pForwardProjector);
 	ASTRA_DELETE(pBackProjector);
 	ASTRA_DELETE(pFirstForwardProjector);
+
+	return true;
 }
 //----------------------------------------------------------------------------------------
 

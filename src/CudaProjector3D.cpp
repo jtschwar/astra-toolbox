@@ -33,13 +33,10 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include "astra/ConeProjectionGeometry3D.h"
 #include "astra/ConeVecProjectionGeometry3D.h"
 
+#include "astra/Logging.h"
 
 namespace astra
 {
-
-// type of the projector, needed to register with CProjectorFactory
-std::string CCudaProjector3D::type = "cuda3d";
-
 
 //----------------------------------------------------------------------------------------
 // Default constructor
@@ -59,8 +56,8 @@ CCudaProjector3D::~CCudaProjector3D()
 // Clear for constructors
 void CCudaProjector3D::_clear()
 {
-	m_pProjectionGeometry = NULL;
-	m_pVolumeGeometry = NULL;
+	m_pProjectionGeometry.reset();
+	m_pVolumeGeometry.reset();
 	m_bIsInitialized = false;
 
 	m_projectionKernel = ker3d_default;
@@ -73,8 +70,6 @@ void CCudaProjector3D::_clear()
 // Clear
 void CCudaProjector3D::clear()
 {
-	ASTRA_DELETE(m_pProjectionGeometry);
-	ASTRA_DELETE(m_pVolumeGeometry);
 	m_bIsInitialized = false;
 }
 
@@ -97,8 +92,7 @@ bool CCudaProjector3D::_check()
 // Initialize, use a Config object
 bool CCudaProjector3D::initialize(const Config& _cfg)
 {
-	assert(_cfg.self);
-	ConfigStackCheck<CProjector3D> CC("CudaProjector3D", this, _cfg);
+	ConfigReader<CProjector3D> CR("CudaProjector3D", this, _cfg);
 
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -110,32 +104,32 @@ bool CCudaProjector3D::initialize(const Config& _cfg)
 		return false;
 	}
 
-	XMLNode node = _cfg.self.getSingleNode("ProjectionKernel");
-	m_projectionKernel = ker3d_default;
-	if (node) {
-		std::string sProjKernel = node.getContent();
-
-		if (sProjKernel == "default") {
-
-		} else if (sProjKernel == "sum_square_weights") {
-			m_projectionKernel = ker3d_sum_square_weights;
-		} else {
-			return false;
-		}
+	std::string sProjKernel;
+	CR.getString("ProjectionKernel", sProjKernel, "default");
+	if (sProjKernel == "default") {
+		m_projectionKernel = ker3d_default;
+	} else if (sProjKernel == "sum_square_weights") {
+		m_projectionKernel = ker3d_sum_square_weights;
+	} else if (sProjKernel == "2d_weighting") {
+		m_projectionKernel = ker3d_2d_weighting;
+	} else if (sProjKernel == "matched_bp") {
+		m_projectionKernel = ker3d_matched_bp;
+	} else {
+		ASTRA_ERROR("Unknown ProjectionKernel");
+		return false;
 	}
-	CC.markNodeParsed("ProjectionKernel");
 
-	m_iVoxelSuperSampling = (int)_cfg.self.getOptionNumerical("VoxelSuperSampling", 1);
-	CC.markOptionParsed("VoxelSuperSampling");
- 
-	m_iDetectorSuperSampling = (int)_cfg.self.getOptionNumerical("DetectorSuperSampling", 1);
-	CC.markOptionParsed("DetectorSuperSampling");
+	bool ok = true;
 
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUindex", -1);
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUIndex", m_iGPUIndex);
-	CC.markOptionParsed("GPUIndex");
-	if (!_cfg.self.hasOption("GPUIndex"))
-		CC.markOptionParsed("GPUindex");
+	ok &= CR.getOptionInt("VoxelSuperSampling", m_iVoxelSuperSampling, 1);
+	ok &= CR.getOptionInt("DetectorSuperSampling", m_iDetectorSuperSampling, 1);
+
+	if (CR.hasOption("GPUIndex"))
+		ok &= CR.getOptionInt("GPUIndex", m_iGPUIndex, -1);
+	else
+		ok &= CR.getOptionInt("GPUindex", m_iGPUIndex, -1);
+	if (!ok)
+		return false;
 
 	m_bIsInitialized = _check();
 	return m_bIsInitialized;

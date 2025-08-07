@@ -32,13 +32,12 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/DataProjectorPolicies.h"
 
+#include "astra/Logging.h"
+
 using namespace std;
 using namespace astra;
 
 #include "astra/ParallelBeamBlobKernelProjector2D.inl"
-
-// type of the projector, needed to register with CProjectorFactory
-std::string CParallelBeamBlobKernelProjector2D::type = "blob";
 
 //----------------------------------------------------------------------------------------
 // default constructor
@@ -49,8 +48,8 @@ CParallelBeamBlobKernelProjector2D::CParallelBeamBlobKernelProjector2D()
 
 //----------------------------------------------------------------------------------------
 // constructor
-CParallelBeamBlobKernelProjector2D::CParallelBeamBlobKernelProjector2D(CParallelProjectionGeometry2D* _pProjectionGeometry, 
-																	   CVolumeGeometry2D* _pReconstructionGeometry,
+CParallelBeamBlobKernelProjector2D::CParallelBeamBlobKernelProjector2D(const CParallelProjectionGeometry2D &_pProjectionGeometry,
+																	   const CVolumeGeometry2D &_pReconstructionGeometry,
 																	   float32 _fBlobSize,
 																	   float32 _fBlobSampleRate,
 																	   int _iBlobSampleCount,
@@ -72,7 +71,7 @@ CParallelBeamBlobKernelProjector2D::~CParallelBeamBlobKernelProjector2D()
 void CParallelBeamBlobKernelProjector2D::_clear()
 {
 	CProjector2D::_clear();
-	m_pfBlobValues = NULL;
+	m_pfBlobValues.clear();
 	m_iBlobSampleCount = 0;
 	m_fBlobSize = 0;
 	m_fBlobSampleRate = 0;
@@ -84,10 +83,7 @@ void CParallelBeamBlobKernelProjector2D::_clear()
 void CParallelBeamBlobKernelProjector2D::clear()
 {
 	CProjector2D::clear();
-	if (m_pfBlobValues) {
-		delete[] m_pfBlobValues;
-		m_pfBlobValues = NULL;
-	}
+	m_pfBlobValues.clear();
 	m_iBlobSampleCount = 0;
 	m_fBlobSize = 0;
 	m_fBlobSampleRate = 0;
@@ -104,7 +100,6 @@ bool CParallelBeamBlobKernelProjector2D::_check()
 	ASTRA_CONFIG_CHECK(dynamic_cast<CParallelProjectionGeometry2D*>(m_pProjectionGeometry) || dynamic_cast<CParallelVecProjectionGeometry2D*>(m_pProjectionGeometry), "ParallelBeamBlobKernelProjector2D", "Unsupported projection geometry");
 
 	ASTRA_CONFIG_CHECK(m_iBlobSampleCount > 0, "ParallelBeamBlobKernelProjector2D", "m_iBlobSampleCount should be strictly positive.");
-	ASTRA_CONFIG_CHECK(m_pfBlobValues, "ParallelBeamBlobKernelProjector2D", "Invalid Volume Geometry Object.");
 
 	// success
 	return true;
@@ -114,7 +109,7 @@ bool CParallelBeamBlobKernelProjector2D::_check()
 // Initialize, use a Config object
 bool CParallelBeamBlobKernelProjector2D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
+	ConfigReader<CProjector2D> CR("ParallelBeamBlobKernelProjector2D", this, _cfg);
 
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -126,34 +121,28 @@ bool CParallelBeamBlobKernelProjector2D::initialize(const Config& _cfg)
 		return false;
 	}
 
-	// required: Kernel
-	XMLNode node = _cfg.self.getSingleNode("Kernel");
-	ASTRA_CONFIG_CHECK(node, "BlobProjector", "No Kernel tag specified.");
-	{
-		// Required: KernelSize
-		XMLNode node2 = node.getSingleNode("KernelSize");
-		ASTRA_CONFIG_CHECK(node2, "BlobProjector", "No Kernel/KernelSize tag specified.");
-		m_fBlobSize = node2.getContentNumerical();
+	Config *subcfg;
+	std::string _type;
 
-		// Required: SampleRate
-		node2 = node.getSingleNode("SampleRate");
-		ASTRA_CONFIG_CHECK(node2, "BlobProjector", "No Kernel/SampleRate tag specified.");
-		m_fBlobSampleRate = node2.getContentNumerical();
+	if (!CR.getRequiredSubConfig("Kernel", subcfg, _type))
+		return false;
+
+	{
+		ConfigReader<CProjector2D> SCR("ParallelBeamBlobKernelProjector2D::Kernel", this, *subcfg);
+
+		bool ok = true;
 	
-		// Required: SampleCount
-		node2 = node.getSingleNode("SampleCount");
-		ASTRA_CONFIG_CHECK(node2, "BlobProjector", "No Kernel/SampleCount tag specified.");
-		m_iBlobSampleCount = node2.getContentInt();
+		ok &= SCR.getRequiredNumerical("KernelSize", m_fBlobSize);
+		ok &= SCR.getRequiredNumerical("SampleRate", m_fBlobSampleRate);
+		ok &= SCR.getRequiredInt("SampleCount", m_iBlobSampleCount);
+		ok &= SCR.getRequiredNumericalArray("KernelValues", m_pfBlobValues);
+
+		delete subcfg;
+
+		if (!ok)
+			return false;
 	
-		// Required: KernelValues
-		node2 = node.getSingleNode("KernelValues");
-		ASTRA_CONFIG_CHECK(node2, "BlobProjector", "No Kernel/KernelValues tag specified.");
-		vector<float32> values = node2.getContentNumericalArray();
-		ASTRA_CONFIG_CHECK(values.size() == (unsigned int)m_iBlobSampleCount, "BlobProjector", "Number of specified values doesn't match SampleCount.");
-		m_pfBlobValues = new float32[m_iBlobSampleCount];
-		for (int i = 0; i < m_iBlobSampleCount; i++) {
-			m_pfBlobValues[i] = values[i];
-		}
+		ASTRA_CONFIG_CHECK(m_pfBlobValues.size() == (unsigned int)m_iBlobSampleCount, "BlobProjector", "Number of specified values doesn't match SampleCount.");
 	}
 
 	// success
@@ -163,8 +152,8 @@ bool CParallelBeamBlobKernelProjector2D::initialize(const Config& _cfg)
 
 //----------------------------------------------------------------------------------------
 // initialize
-bool CParallelBeamBlobKernelProjector2D::initialize(CParallelProjectionGeometry2D* _pProjectionGeometry, 
-													CVolumeGeometry2D* _pVolumeGeometry,
+bool CParallelBeamBlobKernelProjector2D::initialize(const CParallelProjectionGeometry2D &_pProjectionGeometry,
+													const CVolumeGeometry2D &_pVolumeGeometry,
 													float32 _fBlobSize,
 													float32 _fBlobSampleRate,
 													int _iBlobSampleCount,
@@ -175,14 +164,12 @@ bool CParallelBeamBlobKernelProjector2D::initialize(CParallelProjectionGeometry2
 		clear();
 	}
 
-	ASTRA_CONFIG_CHECK(_pProjectionGeometry, "BlobProjector", "Invalid ProjectionGeometry Object");
-	ASTRA_CONFIG_CHECK(m_pVolumeGeometry, "BlobProjector", "Invalid ProjectionGeometry Object");
-	m_pProjectionGeometry = _pProjectionGeometry->clone();
-	m_pVolumeGeometry = _pVolumeGeometry->clone();
+	m_pProjectionGeometry = _pProjectionGeometry.clone();
+	m_pVolumeGeometry = _pVolumeGeometry.clone();
 	m_fBlobSize = _fBlobSize;
 	m_fBlobSampleRate = _fBlobSampleRate;
 	m_iBlobSampleCount = _iBlobSampleCount;
-	m_pfBlobValues = new float32[_iBlobSampleCount];
+	m_pfBlobValues.resize(_iBlobSampleCount);
 	for (int i = 0; i <_iBlobSampleCount; i++) {
 		m_pfBlobValues[i] = _pfBlobValues[i];
 	}

@@ -28,13 +28,14 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #ifndef _CUDA_MEM3D_H
 #define _CUDA_MEM3D_H
 
-#include <boost/shared_ptr.hpp>
-
 #include "astra3d.h"
+
+#include <memory>
 
 namespace astra {
 class CVolumeGeometry3D;
-class CProjectionGeometry3D;	
+class CProjectionGeometry3D;
+struct SFilterConfig;
 }
 
 
@@ -58,7 +59,7 @@ namespace astraCUDA3d {
 struct SMemHandle3D_internal;
 
 struct MemHandle3D {
-	boost::shared_ptr<SMemHandle3D_internal> d;
+	std::shared_ptr<SMemHandle3D_internal> d;
 	operator bool() const { return (bool)d; }
 };
 
@@ -95,24 +96,24 @@ MemHandle3D createProjectionArrayHandle(const float *ptr, unsigned int x, unsign
 
 MemHandle3D allocateGPUMemory(unsigned int x, unsigned int y, unsigned int z, Mem3DZeroMode zero);
 
-bool copyToGPUMemory(const float *src, MemHandle3D dst, const SSubDimensions3D &pos);
+bool copyToGPUMemory(const float *src, MemHandle3D &dst, const SSubDimensions3D &pos);
 
-bool copyFromGPUMemory(float *dst, MemHandle3D src, const SSubDimensions3D &pos);
+bool copyFromGPUMemory(float *dst, MemHandle3D &src, const SSubDimensions3D &pos);
 
-bool freeGPUMemory(MemHandle3D handle);
+bool freeGPUMemory(MemHandle3D &handle);
 
-bool zeroGPUMemory(MemHandle3D handle, unsigned int x, unsigned int y, unsigned int z);
+bool zeroGPUMemory(MemHandle3D &handle, unsigned int x, unsigned int y, unsigned int z);
 
 bool setGPUIndex(int index);
 
-bool copyIntoArray(MemHandle3D handle, MemHandle3D subdata, const SSubDimensions3D &pos);
+bool copyIntoArray(MemHandle3D &handle, MemHandle3D &subdata, const SSubDimensions3D &pos);
 
 
-bool FP(const astra::CProjectionGeometry3D* pProjGeom, MemHandle3D projData, const astra::CVolumeGeometry3D* pVolGeom, MemHandle3D volData, int iDetectorSuperSampling, astra::Cuda3DProjectionKernel projKernel);
+bool FP(const astra::CProjectionGeometry3D* pProjGeom, MemHandle3D &projData, const astra::CVolumeGeometry3D* pVolGeom, MemHandle3D &volData, int iDetectorSuperSampling, astra::Cuda3DProjectionKernel projKernel);
 
-bool BP(const astra::CProjectionGeometry3D* pProjGeom, MemHandle3D projData, const astra::CVolumeGeometry3D* pVolGeom, MemHandle3D volData, int iVoxelSuperSampling);
+bool BP(const astra::CProjectionGeometry3D* pProjGeom, MemHandle3D &projData, const astra::CVolumeGeometry3D* pVolGeom, MemHandle3D &volData, int iVoxelSuperSampling, astra::Cuda3DProjectionKernel projKernel);
 
-bool FDK(const astra::CProjectionGeometry3D* pProjGeom, MemHandle3D projData, const astra::CVolumeGeometry3D* pVolGeom, MemHandle3D volData, bool bShortScan, const float *pfFilter = 0);
+bool FDK(const astra::CProjectionGeometry3D* pProjGeom, MemHandle3D &projData, const astra::CVolumeGeometry3D* pVolGeom, MemHandle3D &volData, bool bShortScan, const astra::SFilterConfig &filterConfig, float fOutputScale = 1.0f);
 
 }
 

@@ -27,6 +27,9 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/FanFlatVecProjectionGeometry2D.h"
 
+#include "astra/XMLConfig.h"
+#include "astra/Logging.h"
+
 #include <cstring>
 #include <sstream>
 
@@ -111,8 +114,7 @@ bool CFanFlatVecProjectionGeometry2D::initialize(int _iProjectionAngleCount,
 // Initialization with a Config object
 bool CFanFlatVecProjectionGeometry2D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CProjectionGeometry2D> CC("FanFlatVecProjectionGeometry2D", this, _cfg);	
+	ConfigReader<CProjectionGeometry2D> CR("FanFlatVecProjectionGeometry2D", this, _cfg);	
 
 	XMLNode node;
 
@@ -128,18 +130,12 @@ bool CFanFlatVecProjectionGeometry2D::initialize(const Config& _cfg)
 
 bool CFanFlatVecProjectionGeometry2D::initializeAngles(const Config& _cfg)
 {
-	ConfigStackCheck<CProjectionGeometry2D> CC("FanFlatVecProjectionGeometry2D", this, _cfg);
+	ConfigReader<CProjectionGeometry2D> CR("FanFlatVecProjectionGeometry2D", this, _cfg);
 
 	// Required: Vectors
-	XMLNode node = _cfg.self.getSingleNode("Vectors");
-	ASTRA_CONFIG_CHECK(node, "FanFlatVecProjectionGeometry2D", "No Vectors tag specified.");
-	vector<float32> data;
-	try {
-		data = node.getContentNumericalArray();
-	} catch (const StringUtil::bad_cast &e) {
-		ASTRA_CONFIG_CHECK(false, "FanFlatVecProjectionGeometry2D", "Vectors must be a numerical matrix.");
-	}
-	CC.markNodeParsed("Vectors");
+	vector<double> data;
+	if (!CR.getRequiredNumericalArray("Vectors", data))
+		return false;
 	ASTRA_CONFIG_CHECK(data.size() % 6 == 0, "FanFlatVecProjectionGeometry2D", "Vectors doesn't consist of 6-tuples.");
 	m_iProjectionAngleCount = data.size() / 6;
 	m_pProjectionAngles = new SFanProjection[m_iProjectionAngleCount];
@@ -153,8 +149,8 @@ bool CFanFlatVecProjectionGeometry2D::initializeAngles(const Config& _cfg)
 
 		// The backend code currently expects the corner of the detector, while
 		// the matlab interface supplies the center
-		p.fDetSX = data[6*i +  2] - 0.5f * m_iDetectorCount * p.fDetUX;
-		p.fDetSY = data[6*i +  3] - 0.5f * m_iDetectorCount * p.fDetUY;
+		p.fDetSX = data[6*i +  2] - 0.5 * m_iDetectorCount * p.fDetUX;
+		p.fDetSY = data[6*i +  3] - 0.5 * m_iDetectorCount * p.fDetUY;
 	}
 
 	return true;
@@ -162,19 +158,17 @@ bool CFanFlatVecProjectionGeometry2D::initializeAngles(const Config& _cfg)
 
 //----------------------------------------------------------------------------------------
 // Clone
-CProjectionGeometry2D* CFanFlatVecProjectionGeometry2D::clone()
+CProjectionGeometry2D* CFanFlatVecProjectionGeometry2D::clone() const
 {
 	return new CFanFlatVecProjectionGeometry2D(*this);
 }
 
 //----------------------------------------------------------------------------------------
 // is equal
-bool CFanFlatVecProjectionGeometry2D::isEqual(CProjectionGeometry2D* _pGeom2) const
+bool CFanFlatVecProjectionGeometry2D::isEqual(const CProjectionGeometry2D &_pGeom2) const
 {
-	if (_pGeom2 == NULL) return false;
-
 	// try to cast argument to CFanFlatVecProjectionGeometry2D
-	CFanFlatVecProjectionGeometry2D* pGeom2 = dynamic_cast<CFanFlatVecProjectionGeometry2D*>(_pGeom2);
+	const CFanFlatVecProjectionGeometry2D* pGeom2 = dynamic_cast<const CFanFlatVecProjectionGeometry2D*>(&_pGeom2);
 	if (pGeom2 == NULL) return false;
 
 	// both objects must be initialized
@@ -200,26 +194,6 @@ bool CFanFlatVecProjectionGeometry2D::isOfType(const std::string& _sType)
 
 //----------------------------------------------------------------------------------------
 
-CVector3D CFanFlatVecProjectionGeometry2D::getProjectionDirection(int _iProjectionIndex, int _iDetectorIndex /* = 0 */)
-{
-	CVector3D vOutput(0.0f, 0.0f, 0.0f);
-
-	// not implemented
-	ASTRA_ASSERT(false);
-
-	return vOutput;
-}
-
-//----------------------------------------------------------------------------------------
-
-void CFanFlatVecProjectionGeometry2D::getRayParams(int _iRow, int _iColumn, float32& _fT, float32& _fTheta) const
-{
-	// not implemented
-	ASTRA_ASSERT(false);
-}
-
-//----------------------------------------------------------------------------------------
-
 bool CFanFlatVecProjectionGeometry2D::_check()
 {
 	// TODO
@@ -231,23 +205,25 @@ bool CFanFlatVecProjectionGeometry2D::_check()
 // Get the configuration object
 Config* CFanFlatVecProjectionGeometry2D::getConfiguration() const 
 {
-	Config* cfg = new Config();
-	cfg->initialize("ProjectionGeometry2D");
-	cfg->self.addAttribute("type", "fanflat_vec");
-	cfg->self.addChildNode("DetectorCount", getDetectorCount());
-	std::string vectors = "";
+	ConfigWriter CW("ProjectionGeometry2D", "fanflat_vec");
+
+	CW.addInt("DetectorCount", getDetectorCount());
+
+	std::vector<double> vectors;
+	vectors.resize(6 * m_iProjectionAngleCount);
+
 	for (int i = 0; i < m_iProjectionAngleCount; ++i) {
 		SFanProjection& p = m_pProjectionAngles[i];
-		vectors += StringUtil::toString(p.fSrcX) + ",";
-		vectors += StringUtil::toString(p.fSrcY) + ",";
-		vectors += StringUtil::toString(p.fDetSX + 0.5f * m_iDetectorCount * p.fDetUX) + ",";
-		vectors += StringUtil::toString(p.fDetSY + 0.5f * m_iDetectorCount * p.fDetUY) + ",";
-		vectors += StringUtil::toString(p.fDetUX) + ",";
-		vectors += StringUtil::toString(p.fDetUY);
-		if (i < m_iProjectionAngleCount-1) vectors += ';';
+		vectors[6*i + 0] = p.fSrcX;
+		vectors[6*i + 1] = p.fSrcY;
+		vectors[6*i + 2] = p.fDetSX + 0.5 * m_iDetectorCount * p.fDetUX;
+		vectors[6*i + 3] = p.fDetSY + 0.5 * m_iDetectorCount * p.fDetUY;
+		vectors[6*i + 4] = p.fDetUX;
+		vectors[6*i + 5] = p.fDetUY;
 	}
-	cfg->self.addChildNode("Vectors", vectors);
-	return cfg;
+	CW.addNumericalMatrix("Vectors", &vectors[0], m_iProjectionAngleCount, 6);
+
+	return CW.getConfig();
 }
 //----------------------------------------------------------------------------------------
 

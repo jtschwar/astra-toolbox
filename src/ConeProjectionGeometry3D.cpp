@@ -28,6 +28,7 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include "astra/ConeProjectionGeometry3D.h"
 
 #include "astra/Logging.h"
+#include "astra/XMLConfig.h"
 #include "astra/GeometryUtil3D.h"
 
 #include <cstring>
@@ -53,7 +54,7 @@ CConeProjectionGeometry3D::CConeProjectionGeometry3D(int _iProjectionAngleCount,
 															 int _iDetectorColCount, 
 															 float32 _fDetectorWidth, 
 															 float32 _fDetectorHeight, 
-															 const float32* _pfProjectionAngles,
+															 std::vector<float32> &&_pfProjectionAngles,
 															 float32 _fOriginSourceDistance, 
 															 float32 _fOriginDetectorDistance) :
 	CProjectionGeometry3D() 
@@ -63,7 +64,7 @@ CConeProjectionGeometry3D::CConeProjectionGeometry3D(int _iProjectionAngleCount,
 			   _iDetectorColCount, 
 			   _fDetectorWidth, 
 			   _fDetectorHeight, 
-			   _pfProjectionAngles,
+			   std::move(_pfProjectionAngles),
 			   _fOriginSourceDistance,
 			   _fOriginDetectorDistance);
 }
@@ -79,32 +80,19 @@ CConeProjectionGeometry3D::~CConeProjectionGeometry3D()
 // Initialize - Config
 bool CConeProjectionGeometry3D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CProjectionGeometry3D> CC("ConeProjectionGeometry3D", this, _cfg);	
+	ConfigReader<CProjectionGeometry3D> CR("ConeProjectionGeometry3D", this, _cfg);	
 
 	// initialization of parent class
 	if (!CProjectionGeometry3D::initialize(_cfg))
 		return false;
 
-	// Required: DistanceOriginDetector
-	XMLNode node = _cfg.self.getSingleNode("DistanceOriginDetector");
-	ASTRA_CONFIG_CHECK(node, "ConeProjectionGeometry3D", "No DistanceOriginDetector tag specified.");
-	try {
-		m_fOriginDetectorDistance = node.getContentNumerical();
-	} catch (const StringUtil::bad_cast &e) {
-		ASTRA_CONFIG_CHECK(false, "ConeProjectionGeometry3D", "DistanceOriginDetector must be numerical.");
-	}
-	CC.markNodeParsed("DistanceOriginDetector");
+	bool ok = true;
 
-	// Required: DetectorOriginSource
-	node = _cfg.self.getSingleNode("DistanceOriginSource");
-	ASTRA_CONFIG_CHECK(node, "ConeProjectionGeometry3D", "No DistanceOriginSource tag specified.");
-	try {
-		m_fOriginSourceDistance = node.getContentNumerical();
-	} catch (const StringUtil::bad_cast &e) {
-		ASTRA_CONFIG_CHECK(false, "ConeProjectionGeometry3D", "DistanceOriginSource must be numerical.");
-	}
-	CC.markNodeParsed("DistanceOriginSource");
+	ok &= CR.getRequiredNumerical("DistanceOriginDetector", m_fOriginDetectorDistance);
+	ok &= CR.getRequiredNumerical("DistanceOriginSource", m_fOriginSourceDistance);
+
+	if (!ok)
+		return false;
 
 	// success
 	m_bInitialized = _check();
@@ -118,7 +106,7 @@ bool CConeProjectionGeometry3D::initialize(int _iProjectionAngleCount,
 											   int _iDetectorColCount, 
 											   float32 _fDetectorWidth, 
 											   float32 _fDetectorHeight, 
-											   const float32* _pfProjectionAngles,
+											   std::vector<float32> &&_pfProjectionAngles,
 											   float32 _fOriginSourceDistance, 
 											   float32 _fOriginDetectorDistance)
 {
@@ -127,7 +115,7 @@ bool CConeProjectionGeometry3D::initialize(int _iProjectionAngleCount,
 			    _iDetectorColCount, 
 			    _fDetectorWidth, 
 			    _fDetectorHeight, 
-			    _pfProjectionAngles);
+			    std::move(_pfProjectionAngles));
 
 	m_fOriginSourceDistance = _fOriginSourceDistance;
 	m_fOriginDetectorDistance = _fOriginDetectorDistance;
@@ -149,8 +137,7 @@ CProjectionGeometry3D* CConeProjectionGeometry3D::clone() const
 	res->m_iDetectorTotCount		= m_iDetectorTotCount;
 	res->m_fDetectorSpacingX		= m_fDetectorSpacingX;
 	res->m_fDetectorSpacingY		= m_fDetectorSpacingY;
-	res->m_pfProjectionAngles		= new float32[m_iProjectionAngleCount];
-	memcpy(res->m_pfProjectionAngles, m_pfProjectionAngles, sizeof(float32)*m_iProjectionAngleCount);
+	res->m_pfProjectionAngles		= m_pfProjectionAngles;
 	res->m_fOriginSourceDistance	= m_fOriginSourceDistance;
 	res->m_fOriginDetectorDistance	= m_fOriginDetectorDistance;
 	return res;
@@ -197,46 +184,20 @@ bool CConeProjectionGeometry3D::isOfType(const std::string& _sType) const
 // Get the configuration object
 Config* CConeProjectionGeometry3D::getConfiguration() const 
 {
-	Config* cfg = new Config();
-	cfg->initialize("ProjectionGeometry3D");
-	cfg->self.addAttribute("type", "cone");
-	cfg->self.addChildNode("DetectorSpacingX", m_fDetectorSpacingX);
-	cfg->self.addChildNode("DetectorSpacingY", m_fDetectorSpacingY);
-	cfg->self.addChildNode("DetectorRowCount", m_iDetectorRowCount);
-	cfg->self.addChildNode("DetectorColCount", m_iDetectorColCount);
-	cfg->self.addChildNode("DistanceOriginDetector", m_fOriginDetectorDistance);
-	cfg->self.addChildNode("DistanceOriginSource", m_fOriginSourceDistance);
-	cfg->self.addChildNode("ProjectionAngles", m_pfProjectionAngles, m_iProjectionAngleCount);
-	return cfg;
+	ConfigWriter CW("ProjectionGeometry3D", "cone");
+
+	CW.addInt("DetectorRowCount", m_iDetectorRowCount);
+	CW.addInt("DetectorColCount", m_iDetectorColCount);
+	CW.addNumerical("DetectorSpacingX", m_fDetectorSpacingX);
+	CW.addNumerical("DetectorSpacingY", m_fDetectorSpacingY);
+	CW.addNumerical("DistanceOriginDetector", m_fOriginDetectorDistance);
+	CW.addNumerical("DistanceOriginSource", m_fOriginSourceDistance);
+	CW.addNumericalArray("ProjectionAngles", &m_pfProjectionAngles[0], m_iProjectionAngleCount);
+
+	return CW.getConfig();
 }
 
 //----------------------------------------------------------------------------------------
-
-CVector3D CConeProjectionGeometry3D::getProjectionDirection(int _iProjectionIndex, int _iDetectorIndex) const
-{
-	float32 fSrcX = -m_fOriginSourceDistance;
-	float32 fSrcY = 0.0f;
-	float32 fSrcZ = 0.0f;
-
-	float32 fDetX = m_fOriginDetectorDistance;
-	float32 fDetY = 0.0f;
-	float32 fDetZ = 0.0f;
-
-	fDetY += indexToDetectorOffsetX(_iDetectorIndex);
-	fDetZ += indexToDetectorOffsetY(_iDetectorIndex);
-
-	float32 angle = m_pfProjectionAngles[_iProjectionIndex];
-
-	#define ROTATE(name,alpha) do { float32 tX = f##name##X * cos(alpha) - f##name##Y * sin(alpha); f##name##Y = f##name##X * sin(alpha) + f##name##Y * cos(alpha); f##name##X = tX; } while(0)
-
-	ROTATE(Src, angle);
-	ROTATE(Det, angle);
-
-	#undef ROTATE
-
-	CVector3D ret(fDetX - fSrcX, fDetY - fSrcY, fDetZ - fSrcZ);
-	return ret;
-}
 
 void CConeProjectionGeometry3D::projectPoint(double fX, double fY, double fZ,
                                              int iAngleIndex,

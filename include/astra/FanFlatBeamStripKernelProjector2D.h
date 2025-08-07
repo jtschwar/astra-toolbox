@@ -69,7 +69,7 @@ protected:
 public:
 
 	// type of the projector, needed to register with CProjectorFactory
-	static std::string type;
+	static inline const char* const type = "strip_fanflat";
 
 	/** Default constructor.
 	 */
@@ -80,8 +80,8 @@ public:
 	 * @param _pProjectionGeometry		Information class about the geometry of the projection.  Will be HARDCOPIED.
 	 * @param _pReconstructionGeometry	Information class about the geometry of the reconstruction volume. Will be HARDCOPIED.
 	 */
-	CFanFlatBeamStripKernelProjector2D(CFanFlatProjectionGeometry2D* _pProjectionGeometry, 
-									   CVolumeGeometry2D* _pReconstructionGeometry);
+	CFanFlatBeamStripKernelProjector2D(const CFanFlatProjectionGeometry2D &_pProjectionGeometry,
+									   const CVolumeGeometry2D &_pReconstructionGeometry);
 	
 	/** Destructor, is virtual to show that we are aware subclass destructor are called.
 	 */	
@@ -100,8 +100,8 @@ public:
 	 * @param _pReconstructionGeometry	Information class about the geometry of the reconstruction volume.  Will be HARDCOPIED.
 	 * @return initialization successful?
 	 */
-	virtual bool initialize(CFanFlatProjectionGeometry2D* _pProjectionGeometry, 
-		                    CVolumeGeometry2D* _pReconstructionGeometry);
+	bool initialize(const CFanFlatProjectionGeometry2D &_pProjectionGeometry,
+	                const CVolumeGeometry2D &_pReconstructionGeometry);
 
 	/** Clear this class.
 	 */

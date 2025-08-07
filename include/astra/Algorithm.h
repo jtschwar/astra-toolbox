@@ -28,8 +28,6 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #ifndef _INC_ASTRA_ALGORITHM
 #define _INC_ASTRA_ALGORITHM
 
-#include <boost/any.hpp>
-
 #include "Globals.h"
 #include "Config.h"
 
@@ -57,24 +55,11 @@ public:
 	 */
 	virtual bool initialize(const Config& _cfg) = 0;
 
-	/** Get all information parameters
-	 *
-	 * @return map with all boost::any object
-	 */
-	virtual std::map<std::string,boost::any> getInformation();
-
-	/** Get a single piece of information represented as a boost::any
-	 *
-	 * @param _sIdentifier identifier string to specify which piece of information you want
-	 * @return boost::any object
-	 */
-	virtual boost::any getInformation(std::string _sIdentifier);
-
 	/** Perform a number of iterations.
 	 *
 	 * @param _iNrIterations amount of iterations to perform.
 	 */
-	virtual void run(int _iNrIterations = 0) = 0;
+	virtual bool run(int _iNrIterations = 0) = 0;
 
 	/** Has this class been initialized?
 	 *
@@ -111,7 +96,7 @@ private:
 
 	//< For Config unused argument checking
 	ConfigCheckData* configCheckData;
-	friend class ConfigStackCheck<CAlgorithm>;
+	friend class ConfigReader<CAlgorithm>;
 
 };
 

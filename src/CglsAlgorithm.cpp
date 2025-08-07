@@ -29,14 +29,13 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/AstraObjectManager.h"
 
+#include "astra/Logging.h"
+
 using namespace std;
 
 namespace astra {
 
 #include "astra/Projector2DImpl.inl"
-
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CCglsAlgorithm::type = "CGLS";
 
 //----------------------------------------------------------------------------------------
 // Constructor
@@ -108,8 +107,7 @@ bool CCglsAlgorithm::_check()
 // Initialize - Config
 bool CCglsAlgorithm::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("CglsAlgorithm", this, _cfg);
+	ConfigReader<CAlgorithm> CR("CglsAlgorithm", this, _cfg);
 
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -163,24 +161,9 @@ bool CCglsAlgorithm::initialize(CProjector2D* _pProjector,
 	return m_bIsInitialized;
 }
 
-//---------------------------------------------------------------------------------------
-// Information - All
-map<string,boost::any> CCglsAlgorithm::getInformation() 
-{
-	map<string, boost::any> res;
-	return mergeMap<string,boost::any>(CReconstructionAlgorithm2D::getInformation(), res);
-};
-
-//---------------------------------------------------------------------------------------
-// Information - Specific
-boost::any CCglsAlgorithm::getInformation(std::string _sIdentifier) 
-{
-	return CAlgorithm::getInformation(_sIdentifier);
-};
-
 //----------------------------------------------------------------------------------------
 // Iterate
-void CCglsAlgorithm::run(int _iNrIterations)
+bool CCglsAlgorithm::run(int _iNrIterations)
 {
 	// check initialized
 	ASTRA_ASSERT(m_bIsInitialized);
@@ -209,7 +192,7 @@ void CCglsAlgorithm::run(int _iNrIterations)
 
 
 
-	int i;
+	size_t i;
 
 	if (m_iIteration == 0) {
 		// r = b;
@@ -239,6 +222,7 @@ void CCglsAlgorithm::run(int _iNrIterations)
 	for (int iIteration = _iNrIterations-1; iIteration >= 0; --iIteration) {
 	
 		// w = A*p;
+		w->setData(0.0f); // ensure masked out elements are zeroed
 		pForwardProjector->project();
 	
 		// alpha = gamma/dot(w,w);
@@ -288,6 +272,7 @@ void CCglsAlgorithm::run(int _iNrIterations)
 		m_iIteration++;
 	}
 
+	return true;
 }
 //----------------------------------------------------------------------------------------
 

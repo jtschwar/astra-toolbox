@@ -33,8 +33,7 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "Algorithm.h"
 
-#include "Float32ProjectionData3DMemory.h"
-#include "Float32VolumeData3DMemory.h"
+#include "Data3D.h"
 #include "ReconstructionAlgorithm3D.h"
 
 #ifdef ASTRA_CUDA
@@ -56,7 +55,7 @@ protected:
 public:
 	
 	// type of the algorithm, needed to register with CAlgorithmFactory
-	static std::string type;
+	static inline const char* const type = "BP3D_CUDA";
 	
 	/** Default constructor, does not initialize the object.
 	 */
@@ -102,24 +101,11 @@ public:
 					CFloat32ProjectionData3D* _pSinogram, 
 					CFloat32VolumeData3D* _pReconstruction);
 
-	/** Get all information parameters
-	 *
-	 * @return map with all boost::any object
-	 */
-	virtual std::map<std::string,boost::any> getInformation();
-
-	/** Get a single piece of information represented as a boost::any
-	 *
-	 * @param _sIdentifier identifier string to specify which piece of information you want
-	 * @return boost::any object
-	 */
-	virtual boost::any getInformation(std::string _sIdentifier);
-
 	/** Perform a number of iterations.
 	 *
 	 * @param _iNrIterations amount of iterations to perform.
 	 */
-	virtual void run(int _iNrIterations = 0);
+	virtual bool run(int _iNrIterations = 0);
 
 	/** Get a description of the class.
 	 *

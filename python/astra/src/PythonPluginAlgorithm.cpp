@@ -29,6 +29,7 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "PythonPluginAlgorithm.h"
 
+#include "astra/XMLConfig.h"
 #include "astra/Logging.h"
 #include "astra/Utilities.h"
 #include <iostream>
@@ -56,24 +57,20 @@ void logPythonError(){
                 exc = PyObject_CallMethod(traceback,"format_exception","OOO",ptype, pvalue, ptraceback);
             }
             if(exc!=NULL){
-                PyObject *six = PyImport_ImportModule("six");
-                if(six!=NULL){
-                    PyObject *iter = PyObject_GetIter(exc);
-                    if(iter!=NULL){
-                        PyObject *line;
-                        std::string errStr = "";
-                        while(line = PyIter_Next(iter)){
-                            PyObject *retb = PyObject_CallMethod(six,"b","O",line);
-                            if(retb!=NULL){
-                                errStr += std::string(PyBytes_AsString(retb));
-                                Py_DECREF(retb);
-                            }
-                            Py_DECREF(line);
+                PyObject *iter = PyObject_GetIter(exc);
+                if(iter!=NULL){
+                    PyObject *line;
+                    std::string errStr = "";
+                    while((line = PyIter_Next(iter))){
+                        PyObject *retb = PyUnicode_AsASCIIString(line);
+                        if(retb!=NULL){
+                            errStr += std::string(PyBytes_AsString(retb));
+                            Py_DECREF(retb);
                         }
-                        ASTRA_ERROR("%s",errStr.c_str());
-                        Py_DECREF(iter);
+                        Py_DECREF(line);
                     }
-                    Py_DECREF(six);
+                    ASTRA_ERROR("%s",errStr.c_str());
+                    Py_DECREF(iter);
                 }
                 Py_DECREF(exc);
             }
@@ -100,7 +97,11 @@ CPluginAlgorithm::~CPluginAlgorithm(){
 
 bool CPluginAlgorithm::initialize(const Config& _cfg){
     if(instance==NULL) return false;
-    PyObject *cfgDict = XMLNode2dict(_cfg.self);
+
+    const XMLConfig *xmlcfg = dynamic_cast<const XMLConfig*>(&_cfg);
+    if (xmlcfg==NULL) return false;
+
+    PyObject *cfgDict = XMLNode2dict(xmlcfg->self);
     PyObject *retVal = PyObject_CallMethod(instance, "astra_init", "O",cfgDict);
     Py_DECREF(cfgDict);
     if(retVal==NULL){
@@ -112,8 +113,8 @@ bool CPluginAlgorithm::initialize(const Config& _cfg){
     return m_bIsInitialized;
 }
 
-void CPluginAlgorithm::run(int _iNrIterations){
-    if(instance==NULL) return;
+bool CPluginAlgorithm::run(int _iNrIterations){
+    if(instance==NULL) return false;
     PyGILState_STATE state = PyGILState_Ensure();
     PyObject *retVal = PyObject_CallMethod(instance, "run", "i",_iNrIterations);
     if(retVal==NULL){
@@ -122,6 +123,8 @@ void CPluginAlgorithm::run(int _iNrIterations){
         Py_DECREF(retVal);
     }
     PyGILState_Release(state);
+
+    return (retVal != NULL);
 }
 
 PyObject *CPluginAlgorithm::getInstance() const {
@@ -130,15 +133,9 @@ PyObject *CPluginAlgorithm::getInstance() const {
 	return instance;
 }
 
-#if PY_MAJOR_VERSION >= 3
 PyObject * pyStringFromString(std::string str){
     return PyUnicode_FromString(str.c_str());
 }
-#else
-PyObject * pyStringFromString(std::string str){
-    return PyBytes_FromString(str.c_str());
-}
-#endif
 
 PyObject* stringToPythonValue(std::string str){
     if(str.find(";")!=std::string::npos){

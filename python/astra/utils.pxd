@@ -24,15 +24,18 @@
 # -----------------------------------------------------------------------
 
 from libcpp.string cimport string
+from libcpp.memory cimport unique_ptr
 
-cimport PyXMLDocument
+from . cimport PyXMLDocument
 from .PyXMLDocument cimport XMLDocument
 from .PyXMLDocument cimport XMLNode
 
 from .PyIncludes cimport *
 
 cdef configToDict(Config *)
-cdef Config * dictToConfig(string rootname, dc) except NULL
-cdef CFloat32VolumeData3D* linkVolFromGeometry(CVolumeGeometry3D *pGeometry, data) except NULL
-cdef CFloat32ProjectionData3D* linkProjFromGeometry(CProjectionGeometry3D *pGeometry, data) except NULL
+cdef XMLConfig * dictToConfig(string rootname, dc) except NULL
+cdef CFloat32VolumeData3D* linkVolFromGeometry(const CVolumeGeometry3D &pGeometry, data) except NULL
+cdef CFloat32ProjectionData3D* linkProjFromGeometry(const CProjectionGeometry3D &pGeometry, data) except NULL
+cdef unique_ptr[CProjectionGeometry3D] createProjectionGeometry3D(geometry) except *
+cdef unique_ptr[CVolumeGeometry3D] createVolumeGeometry3D(geometry) except *
 

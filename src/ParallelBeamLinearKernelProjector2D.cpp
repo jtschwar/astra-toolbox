@@ -32,13 +32,12 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/DataProjectorPolicies.h"
 
+#include "astra/Logging.h"
+
 using namespace std;
 using namespace astra;
 
 #include "astra/ParallelBeamLinearKernelProjector2D.inl"
-
-// type of the projector, needed to register with CProjectorFactory
-std::string CParallelBeamLinearKernelProjector2D::type = "linear";
 
 //----------------------------------------------------------------------------------------
 // default constructor
@@ -50,8 +49,8 @@ CParallelBeamLinearKernelProjector2D::CParallelBeamLinearKernelProjector2D()
 
 //----------------------------------------------------------------------------------------
 // constructor
-CParallelBeamLinearKernelProjector2D::CParallelBeamLinearKernelProjector2D(CParallelProjectionGeometry2D* _pProjectionGeometry,
-																		   CVolumeGeometry2D* _pReconstructionGeometry)
+CParallelBeamLinearKernelProjector2D::CParallelBeamLinearKernelProjector2D(const CParallelProjectionGeometry2D &_pProjectionGeometry,
+																		   const CVolumeGeometry2D &_pReconstructionGeometry)
 
 {
 	_clear();
@@ -101,8 +100,6 @@ bool CParallelBeamLinearKernelProjector2D::_check()
 // Initialize, use a Config object
 bool CParallelBeamLinearKernelProjector2D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
 		clear();
@@ -120,8 +117,8 @@ bool CParallelBeamLinearKernelProjector2D::initialize(const Config& _cfg)
 
 //---------------------------------------------------------------------------------------
 // Initialize
-bool CParallelBeamLinearKernelProjector2D::initialize(CParallelProjectionGeometry2D* _pProjectionGeometry, 
-													  CVolumeGeometry2D* _pVolumeGeometry)
+bool CParallelBeamLinearKernelProjector2D::initialize(const CParallelProjectionGeometry2D &_pProjectionGeometry,
+													  const CVolumeGeometry2D &_pVolumeGeometry)
 {
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -129,8 +126,8 @@ bool CParallelBeamLinearKernelProjector2D::initialize(CParallelProjectionGeometr
 	}
 
 	// hardcopy geometries
-	m_pProjectionGeometry = _pProjectionGeometry->clone();
-	m_pVolumeGeometry = _pVolumeGeometry->clone();
+	m_pProjectionGeometry = _pProjectionGeometry.clone();
+	m_pVolumeGeometry = _pVolumeGeometry.clone();
 
 	// success
 	m_bIsInitialized = _check();

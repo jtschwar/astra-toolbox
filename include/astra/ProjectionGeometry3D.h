@@ -89,7 +89,7 @@ protected:
 	/** Dynamically allocated array of projection angles. All angles are represented in radians and lie in 
 	 * the [0,2pi[ interval.
 	 */
-	float32* m_pfProjectionAngles;
+	std::vector<float32> m_pfProjectionAngles;
 	
 	/** Default constructor. Sets all numeric member variables to 0 and all pointer member variables to NULL.
 	 *
@@ -111,11 +111,11 @@ protected:
 	 *                             are represented in radians and lie in the [0,2pi[ interval.
 	 */
 	CProjectionGeometry3D(int _iProjectionAngleCount,
-						  int _iDetectorRowCount,
-						  int _iDetectorColCount,
-						  float32 _fDetectorSpacingX,
-						  float32 _fDetectorSpacingY,
-						  const float32* _pfProjectionAngles);
+	                      int _iDetectorRowCount,
+	                      int _iDetectorColCount,
+	                      float32 _fDetectorSpacingX,
+	                      float32 _fDetectorSpacingY,
+	                      std::vector<float32> &&_pfProjectionAngles);
 
 	/** Copy constructor. 
 	 */
@@ -147,11 +147,11 @@ protected:
 	 *                             are represented in radians and lie in the [0,2pi[ interval.
 	 */
 	bool _initialize(int _iProjectionAngleCount,
-					 int _iDetectorRowCount,
-					 int _iDetectorColCount,
-					 float32 _fDetectorSpacingX,
-					 float32 _fDetectorSpacingY,
-					 const float32* _pfProjectionAngles);
+	                 int _iDetectorRowCount,
+	                 int _iDetectorColCount,
+	                 float32 _fDetectorSpacingX,
+	                 float32 _fDetectorSpacingY,
+	                 std::vector<float32> &&_pfProjectionAngles);
 
 public:
 
@@ -311,7 +311,20 @@ public:
 	 *  It may not be the tighest possible bounding box.
 	 *  This may fall (partially or fully) outside of the actual detector.
 	 */
-	virtual void getProjectedBBox(double fXMin, double fXMax,
+	void getProjectedBBox(double fXMin, double fXMax,
+	                              double fYMin, double fYMax,
+	                              double fZMin, double fZMax,
+	                              double &fUMin, double &fUMax,
+	                              double &fVMin, double &fVMax) const;
+
+	/** Find a bounding box of the projections of a box in the volume
+	 *  for a single projection angle iAngle.
+	 *  It may not be the tighest possible bounding box.
+	 *  This may fall (partially or fully) outside of the actual detector.
+	 */
+
+	virtual void getProjectedBBoxSingleAngle(int iAngle,
+	                              double fXMin, double fXMax,
 	                              double fYMin, double fYMax,
 	                              double fZMin, double fZMax,
 	                              double &fUMin, double &fUMax,
@@ -337,15 +350,9 @@ public:
 	 */
 	 virtual bool isOfType(const std::string& _sType) const = 0;
 
-	 /**
-	  * Returns a vector giving the projection direction for a projection and detector index
-	  */
-	 virtual CVector3D getProjectionDirection(int _iProjectionIndex, int _iDetectorIndex) const = 0;
-
-
 	//< For Config unused argument checking
 	ConfigCheckData* configCheckData;
-	friend class ConfigStackCheck<CProjectionGeometry3D>;
+	friend class ConfigReader<CProjectionGeometry3D>;
 
 protected:
 	virtual bool initializeAngles(const Config& _cfg);
@@ -443,7 +450,7 @@ inline const float32* CProjectionGeometry3D::getProjectionAngles() const
 	// basic checks
 	ASTRA_ASSERT(m_bInitialized);
 
-	return m_pfProjectionAngles;
+	return &m_pfProjectionAngles[0];
 }
 
 

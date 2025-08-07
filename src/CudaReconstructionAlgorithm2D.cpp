@@ -104,8 +104,7 @@ void CCudaReconstructionAlgorithm2D::initializeFromProjector()
 // Initialize - Config
 bool CCudaReconstructionAlgorithm2D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("CudaReconstructionAlgorithm2D", this, _cfg);
+	ConfigReader<CAlgorithm> CR("CudaReconstructionAlgorithm2D", this, _cfg);
 
 	m_bIsInitialized = CReconstructionAlgorithm2D::initialize(_cfg);
 
@@ -114,26 +113,19 @@ bool CCudaReconstructionAlgorithm2D::initialize(const Config& _cfg)
 
 	initializeFromProjector();
 
-	// Deprecated options
-	try {
-		m_iDetectorSuperSampling = _cfg.self.getOptionInt("DetectorSuperSampling", m_iDetectorSuperSampling);
-		m_iPixelSuperSampling = _cfg.self.getOptionInt("PixelSuperSampling", m_iPixelSuperSampling);
-	} catch (const StringUtil::bad_cast &e) {
-		ASTRA_CONFIG_CHECK(false, "CudaReconstructionAlgorithm2D", "Supersampling options must be integers.");
-	}
-	CC.markOptionParsed("DetectorSuperSampling");
-	CC.markOptionParsed("PixelSuperSampling");
+	bool ok = true;
 
-	// GPU number
-	try {
-		m_iGPUIndex = _cfg.self.getOptionInt("GPUindex", -1);
-		m_iGPUIndex = _cfg.self.getOptionInt("GPUIndex", m_iGPUIndex);
-	} catch (const StringUtil::bad_cast &e) {
-		ASTRA_CONFIG_CHECK(false, "CudaReconstructionAlgorithm2D", "GPUIndex must be an integer.");
-	}
-	CC.markOptionParsed("GPUIndex");
-	if (!_cfg.self.hasOption("GPUIndex"))
-		CC.markOptionParsed("GPUindex");
+	// Deprecated options
+	ok &= CR.getOptionInt("PixelSuperSampling", m_iPixelSuperSampling, m_iPixelSuperSampling);
+	ok &= CR.getOptionInt("DetectorSuperSampling", m_iDetectorSuperSampling, m_iDetectorSuperSampling);
+
+	if (CR.hasOption("GPUIndex"))
+		ok &= CR.getOptionInt("GPUIndex", m_iGPUIndex, -1);
+	else
+		ok &= CR.getOptionInt("GPUindex", m_iGPUIndex, -1);
+
+	if (!ok)
+		return false;
 
 	return _check();
 }
@@ -186,66 +178,6 @@ void CCudaReconstructionAlgorithm2D::setGPUIndex(int _iGPUIndex)
 	m_iGPUIndex = _iGPUIndex;
 }
 
-
-//---------------------------------------------------------------------------------------
-// Information - All
-map<string,boost::any> CCudaReconstructionAlgorithm2D::getInformation()
-{
-	// TODO: Verify and clean up
-
-	map<string,boost::any> res;
-	res["ProjectionGeometry"] = getInformation("ProjectionGeometry");
-	res["ReconstructionGeometry"] = getInformation("ReconstructionGeometry");
-	res["ProjectionDataId"] = getInformation("ProjectionDataId");
-	res["ReconstructionDataId"] = getInformation("ReconstructionDataId");
-	res["ReconstructionMaskId"] = getInformation("ReconstructionMaskId");
-	res["GPUindex"] = getInformation("GPUindex");
-	res["DetectorSuperSampling"] = getInformation("DetectorSuperSampling");
-	res["PixelSuperSampling"] = getInformation("PixelSuperSampling");
-	res["UseMinConstraint"] = getInformation("UseMinConstraint");
-	res["MinConstraintValue"] = getInformation("MinConstraintValue");
-	res["UseMaxConstraint"] = getInformation("UseMaxConstraint");
-	res["MaxConstraintValue"] = getInformation("MaxConstraintValue");
-	return mergeMap<string,boost::any>(CReconstructionAlgorithm2D::getInformation(), res);
-}
-
-//---------------------------------------------------------------------------------------
-// Information - Specific
-boost::any CCudaReconstructionAlgorithm2D::getInformation(std::string _sIdentifier)
-{
-	// TODO: Verify and clean up
-
-	if (_sIdentifier == "UseMinConstraint")		{ return m_bUseMinConstraint ? string("yes") : string("no"); }
-	if (_sIdentifier == "MinConstraintValue")	{ return m_fMinValue; }
-	if (_sIdentifier == "UseMaxConstraint")		{ return m_bUseMaxConstraint ? string("yes") : string("no"); }
-	if (_sIdentifier == "MaxConstraintValue")	{ return m_fMaxValue; }
-
-	// TODO: store these so we can return them?
-	if (_sIdentifier == "ProjectionGeometry")	{ return string("not implemented"); }
-	if (_sIdentifier == "ReconstructionGeometry")	{ return string("not implemented"); }
-	if (_sIdentifier == "GPUindex")	{ return m_iGPUIndex; }
-	if (_sIdentifier == "DetectorSuperSampling")	{ return m_iDetectorSuperSampling; }
-	if (_sIdentifier == "PixelSuperSampling")	{ return m_iPixelSuperSampling; }
-
-	if (_sIdentifier == "ProjectionDataId") {
-		int iIndex = CData2DManager::getSingleton().getIndex(m_pSinogram);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	}
-	if (_sIdentifier == "ReconstructionDataId") {
-		int iIndex = CData2DManager::getSingleton().getIndex(m_pReconstruction);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	}
-	if (_sIdentifier == "ReconstructionMaskId") {
-		if (!m_bUseReconstructionMask) return string("not used");
-		int iIndex = CData2DManager::getSingleton().getIndex(m_pReconstructionMask);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	}
-	return CReconstructionAlgorithm2D::getInformation(_sIdentifier);
-}
-
 bool CCudaReconstructionAlgorithm2D::setupGeometry()
 {
 	ASTRA_ASSERT(m_bIsInitialized);
@@ -257,8 +189,8 @@ bool CCudaReconstructionAlgorithm2D::setupGeometry()
 	ok = m_pAlgo->setGPUIndex(m_iGPUIndex);
 	if (!ok) return false;
 
-	const CVolumeGeometry2D& volgeom = *m_pReconstruction->getGeometry();
-	const CProjectionGeometry2D& projgeom = *m_pSinogram->getGeometry();
+	const CVolumeGeometry2D& volgeom = m_pReconstruction->getGeometry();
+	const CProjectionGeometry2D& projgeom = m_pSinogram->getGeometry();
 
 	ok = m_pAlgo->setGeometry(&volgeom, &projgeom);
 	if (!ok) return false;
@@ -296,23 +228,23 @@ void CCudaReconstructionAlgorithm2D::initCUDAAlgorithm()
 
 //----------------------------------------------------------------------------------------
 // Iterate
-void CCudaReconstructionAlgorithm2D::run(int _iNrIterations)
+bool CCudaReconstructionAlgorithm2D::run(int _iNrIterations)
 {
 	// check initialized
 	ASTRA_ASSERT(m_bIsInitialized);
 
 	bool ok = true;
-	const CVolumeGeometry2D& volgeom = *m_pReconstruction->getGeometry();
+	const CVolumeGeometry2D& volgeom = m_pReconstruction->getGeometry();
 
 	if (!m_bAlgoInit) {
 		initCUDAAlgorithm();
 		m_bAlgoInit = true;
 	}
 
-	ok = m_pAlgo->copyDataToGPU(m_pSinogram->getDataConst(), m_pSinogram->getGeometry()->getDetectorCount(),
+	ok = m_pAlgo->copyDataToGPU(m_pSinogram->getDataConst(), m_pSinogram->getGeometry().getDetectorCount(),
 	                            m_pReconstruction->getDataConst(), volgeom.getGridColCount(),
 	                            m_bUseReconstructionMask ? m_pReconstructionMask->getDataConst() : 0, volgeom.getGridColCount(),
-	                            m_bUseSinogramMask ? m_pSinogramMask->getDataConst() : 0, m_pSinogram->getGeometry()->getDetectorCount());
+	                            m_bUseSinogramMask ? m_pSinogramMask->getDataConst() : 0, m_pSinogram->getGeometry().getDetectorCount());
 
 	ASTRA_ASSERT(ok);
 
@@ -336,6 +268,8 @@ void CCudaReconstructionAlgorithm2D::run(int _iNrIterations)
 	                                 volgeom.getGridColCount());
 
 	ASTRA_ASSERT(ok);
+
+	return ok;
 }
 
 bool CCudaReconstructionAlgorithm2D::getResidualNorm(float32& _fNorm)

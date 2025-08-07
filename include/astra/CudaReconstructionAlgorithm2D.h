@@ -51,11 +51,6 @@ namespace astra {
 class _AstraExport CCudaReconstructionAlgorithm2D : public CReconstructionAlgorithm2D {
 
 public:
-
-	/** Default constructor, containing no code.
-	 */
-	CCudaReconstructionAlgorithm2D();
-	
 	/** Destructor.
 	 */
 	virtual ~CCudaReconstructionAlgorithm2D();
@@ -67,33 +62,9 @@ public:
 	 */
 	virtual bool initialize(const Config& _cfg);
 
-	/** Initialize class.
-	 *
-	 * @param _pProjector		Projector Object. (Optional)
-	 * @param _pSinogram		ProjectionData2D object containing the sinogram data.
-	 * @param _pReconstruction	VolumeData2D object for storing the reconstructed volume.
-	 */
-	virtual bool initialize(CProjector2D* _pProjector, 
-	                        CFloat32ProjectionData2D* _pSinogram, 
-	                        CFloat32VolumeData2D* _pReconstruction);
-
-
 	/** Clear this class.
 	 */
 	virtual void clear();
-
-	/** Get all information parameters.
-	 *
-	 * @return map with all boost::any object
-	 */
-	virtual std::map<std::string,boost::any> getInformation();
-
-	/** Get a single piece of information.
-	 *
-	 * @param _sIdentifier identifier string to specify which piece of information you want
-	 * @return boost::any object
-	 */
-	virtual boost::any getInformation(std::string _sIdentifier);
 
 	/** Get a description of the class.
 	 *
@@ -120,10 +91,11 @@ public:
 	 *
 	 * @param _iNrIterations amount of iterations to perform.
 	 */
-	virtual void run(int _iNrIterations = 0);
+	virtual bool run(int _iNrIterations = 0);
 
 protected:
-	
+	CCudaReconstructionAlgorithm2D();
+
 	/** Check this object.
 	 *
 	 * @return object initialized
@@ -133,6 +105,13 @@ protected:
 	/** Initial clearing. Only to be used by constructors.
 	 */
 	void _clear();
+
+	/** Initialize class. For internal use only.
+	 */
+	bool initialize(CProjector2D* _pProjector,
+	                CFloat32ProjectionData2D* _pSinogram,
+	                CFloat32VolumeData2D* _pReconstruction);
+
 
 	/** Set up geometry. For internal use only.
 	 */

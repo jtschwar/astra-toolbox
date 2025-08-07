@@ -104,12 +104,12 @@ protected:
 	CFloat32VolumeData2D* m_pTotalPixelWeight;
 	CFloat32ProjectionData2D* m_pDiffSinogram;
 
-	int m_iIterationCount;
+	unsigned int m_iIterationCount;
 
 public:
 	
 	// type of the algorithm, needed to register with CAlgorithmFactory
-	static std::string type;	
+	static inline const char* const type = "SART";
 	
 	/** Default constructor, containing no code.
 	 */
@@ -180,25 +180,12 @@ public:
 							int* _piProjectionOrder, 
 							int _iProjectionCount);
 
-	/** Get all information parameters
-	 *
-	 * @return map with all boost::any object
-	 */
-	virtual std::map<std::string,boost::any> getInformation();
-
-	/** Get a single piece of information represented as a boost::any
-	 *
-	 * @param _sIdentifier identifier string to specify which piece of information you want
-	 * @return boost::any object
-	 */
-	virtual boost::any getInformation(std::string _sIdentifier);
-
 	/** Perform a number of iterations.  Each iteration is a forward and backprojection of 
 	 * a single projection index.
 	 *
 	 * @param _iNrIterations amount of iterations to perform.
 	 */
-	virtual void run(int _iNrIterations = 1);
+	virtual bool run(int _iNrIterations = 1);
 
 	/** Get a description of the class.
 	 *
@@ -208,13 +195,8 @@ public:
 
 protected:
 
-
 	//< Order of the projections.
-	int* m_piProjectionOrder;
-	//< Number of projections specified in m_piProjectionOrder.
-	int m_iProjectionCount;
-	//< Current index in the projection order array.
-	int m_iCurrentProjection;
+	std::vector<int> m_piProjectionOrder;
 
 	//< Relaxation parameter
 	float m_fLambda;

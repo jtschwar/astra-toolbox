@@ -72,13 +72,6 @@ BOOST_AUTO_TEST_CASE( testParallelProjectionGeometry2D_Offsets )
 	geom.indexToAngleDetectorIndex(10, angle, detector);
 	BOOST_CHECK( angle == 1 );
 	BOOST_CHECK( detector == 2 );
-
-	float t, theta;
-	geom.getRayParams(1, 2, t, theta);
-	BOOST_CHECK( theta == 1.0f );
-	BOOST_CHECK( t == -0.75f );
-
-	// TODO: add test with large angle
 }
 
 BOOST_AUTO_TEST_CASE( testParallelProjectionGeometry2D_Offsets_odd )
@@ -104,7 +97,7 @@ BOOST_AUTO_TEST_CASE( testParallelProjectionGeometry2D_Clone )
 
 	BOOST_REQUIRE( geom2->isInitialized() );
 
-	BOOST_CHECK( geom.isEqual(geom2) );
+	BOOST_CHECK( geom.isEqual(*geom2) );
 	BOOST_CHECK( geom2->getProjectionAngleCount() == 4 );
 	BOOST_CHECK( geom2->getDetectorCount() == 8 );
 	BOOST_CHECK( geom2->getDetectorWidth() == 0.5f );

@@ -27,6 +27,9 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/VolumeGeometry2D.h"
 
+#include "astra/Logging.h"
+#include "astra/XMLConfig.h"
+
 #include <cmath>
 
 namespace astra
@@ -127,7 +130,7 @@ CVolumeGeometry2D::~CVolumeGeometry2D()
 
 //----------------------------------------------------------------------------------------
 // Clone
-CVolumeGeometry2D* CVolumeGeometry2D::clone()
+CVolumeGeometry2D* CVolumeGeometry2D::clone() const
 {
 	CVolumeGeometry2D* res = new CVolumeGeometry2D();
 	res->m_bInitialized		= m_bInitialized;
@@ -153,47 +156,27 @@ CVolumeGeometry2D* CVolumeGeometry2D::clone()
 // Initialization witha Config object
 bool CVolumeGeometry2D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CVolumeGeometry2D> CC("VolumeGeometry2D", this, _cfg);
+	ConfigReader<CVolumeGeometry2D> CR("VolumeGeometry2D", this, _cfg);
 	
 	// uninitialize if the object was initialized before
 	if (m_bInitialized)	{
 		clear();
 	}
 
-	// Required: GridColCount
-	XMLNode node = _cfg.self.getSingleNode("GridColCount");
-	ASTRA_CONFIG_CHECK(node, "VolumeGeometry2D", "No GridColCount tag specified.");
-	try {
-		m_iGridColCount = node.getContentInt();
-	} catch (const StringUtil::bad_cast &e) {
-		ASTRA_CONFIG_CHECK(false, "VolumeGeometry2D", "GridColCount must be an integer.");
-	}
-	CC.markNodeParsed("GridColCount");
+	bool ok = true;
 
-	// Required: GridRowCount
-	node = _cfg.self.getSingleNode("GridRowCount");
-	ASTRA_CONFIG_CHECK(node, "VolumeGeometry2D", "No GridRowCount tag specified.");
-	try {
-		m_iGridRowCount = node.getContentInt();
-	} catch (const StringUtil::bad_cast &e) {
-		ASTRA_CONFIG_CHECK(false, "VolumeGeometry2D", "GridRowCount must be an integer.");
-	}
-	CC.markNodeParsed("GridRowCount");
+	// Required: number of voxels
+	ok &= CR.getRequiredInt("GridColCount", m_iGridColCount);
+	ok &= CR.getRequiredInt("GridRowCount", m_iGridRowCount);
 
-	// Optional: Window minima and maxima
-	try {
-		m_fWindowMinX = _cfg.self.getOptionNumerical("WindowMinX", -m_iGridColCount/2.0f);
-		m_fWindowMaxX = _cfg.self.getOptionNumerical("WindowMaxX", m_iGridColCount/2.0f);
-		m_fWindowMinY = _cfg.self.getOptionNumerical("WindowMinY", -m_iGridRowCount/2.0f);
-		m_fWindowMaxY = _cfg.self.getOptionNumerical("WindowMaxY", m_iGridRowCount/2.0f);
-	} catch (const StringUtil::bad_cast &e) {
-		ASTRA_CONFIG_CHECK(false, "VolumeGeometry2D", "Window extents must be numerical.");
-	}
-	CC.markOptionParsed("WindowMinX");
-	CC.markOptionParsed("WindowMaxX");
-	CC.markOptionParsed("WindowMinY");
-	CC.markOptionParsed("WindowMaxY");
+	// Optional: window minima and maxima
+	ok &= CR.getOptionNumerical("WindowMinX", m_fWindowMinX, -m_iGridColCount/2.0f);
+	ok &= CR.getOptionNumerical("WindowMaxX", m_fWindowMaxX, m_iGridColCount/2.0f);
+	ok &= CR.getOptionNumerical("WindowMinY", m_fWindowMinY, -m_iGridRowCount/2.0f);
+	ok &= CR.getOptionNumerical("WindowMaxY", m_fWindowMaxY, m_iGridRowCount/2.0f);
+
+	if (!ok)
+		return false;
 
 	_calculateDependents();
 
@@ -259,29 +242,27 @@ void CVolumeGeometry2D::_calculateDependents()
 
 //----------------------------------------------------------------------------------------
 // is of type
-bool CVolumeGeometry2D::isEqual(CVolumeGeometry2D* _pGeom2) const
+bool CVolumeGeometry2D::isEqual(const CVolumeGeometry2D &_pGeom2) const
 {
-	if (_pGeom2 == NULL) return false;
-
 	// both objects must be initialized
-	if (!m_bInitialized || !_pGeom2->m_bInitialized) return false;
+	if (!m_bInitialized || !_pGeom2.m_bInitialized) return false;
 
 	// check all values
-	if (m_iGridColCount != _pGeom2->m_iGridColCount)		return false;
-	if (m_iGridRowCount != _pGeom2->m_iGridRowCount)		return false;
-	if (m_iGridTotCount != _pGeom2->m_iGridTotCount)		return false;
-	if (m_fWindowLengthX != _pGeom2->m_fWindowLengthX)		return false;
-	if (m_fWindowLengthY != _pGeom2->m_fWindowLengthY)		return false;
-	if (m_fWindowArea != _pGeom2->m_fWindowArea)			return false;
-	if (m_fPixelLengthX != _pGeom2->m_fPixelLengthX)		return false;
-	if (m_fPixelLengthY != _pGeom2->m_fPixelLengthY)		return false;
-	if (m_fPixelArea != _pGeom2->m_fPixelArea)				return false;
-	if (m_fDivPixelLengthX != _pGeom2->m_fDivPixelLengthX)	return false;
-	if (m_fDivPixelLengthY != _pGeom2->m_fDivPixelLengthY)	return false;
-	if (m_fWindowMinX != _pGeom2->m_fWindowMinX)			return false;
-	if (m_fWindowMinY != _pGeom2->m_fWindowMinY)			return false;
-	if (m_fWindowMaxX != _pGeom2->m_fWindowMaxX)			return false;
-	if (m_fWindowMaxY != _pGeom2->m_fWindowMaxY)			return false;
+	if (m_iGridColCount != _pGeom2.m_iGridColCount)		return false;
+	if (m_iGridRowCount != _pGeom2.m_iGridRowCount)		return false;
+	if (m_iGridTotCount != _pGeom2.m_iGridTotCount)		return false;
+	if (m_fWindowLengthX != _pGeom2.m_fWindowLengthX)		return false;
+	if (m_fWindowLengthY != _pGeom2.m_fWindowLengthY)		return false;
+	if (m_fWindowArea != _pGeom2.m_fWindowArea)			return false;
+	if (m_fPixelLengthX != _pGeom2.m_fPixelLengthX)		return false;
+	if (m_fPixelLengthY != _pGeom2.m_fPixelLengthY)		return false;
+	if (m_fPixelArea != _pGeom2.m_fPixelArea)				return false;
+	if (m_fDivPixelLengthX != _pGeom2.m_fDivPixelLengthX)	return false;
+	if (m_fDivPixelLengthY != _pGeom2.m_fDivPixelLengthY)	return false;
+	if (m_fWindowMinX != _pGeom2.m_fWindowMinX)			return false;
+	if (m_fWindowMinY != _pGeom2.m_fWindowMinY)			return false;
+	if (m_fWindowMaxX != _pGeom2.m_fWindowMaxX)			return false;
+	if (m_fWindowMaxY != _pGeom2.m_fWindowMaxY)			return false;
 	
 	return true;
 }
@@ -290,18 +271,16 @@ bool CVolumeGeometry2D::isEqual(CVolumeGeometry2D* _pGeom2) const
 // Get the configuration object
 Config* CVolumeGeometry2D::getConfiguration() const 
 {
-	Config* cfg = new Config();
-	cfg->initialize("VolumeGeometry2D");
+	ConfigWriter CW("VolumeGeometry2D");
 
-	cfg->self.addChildNode("GridColCount", m_iGridColCount);
-	cfg->self.addChildNode("GridRowCount", m_iGridRowCount);
+	CW.addInt("GridColCount", m_iGridColCount);
+	CW.addInt("GridRowCount", m_iGridRowCount);
+	CW.addOptionNumerical("WindowMinX", m_fWindowMinX);
+	CW.addOptionNumerical("WindowMaxX", m_fWindowMaxX);
+	CW.addOptionNumerical("WindowMinY", m_fWindowMinY);
+	CW.addOptionNumerical("WindowMaxY", m_fWindowMaxY);
 
-	cfg->self.addOption("WindowMinX", m_fWindowMinX);
-	cfg->self.addOption("WindowMaxX", m_fWindowMaxX);
-	cfg->self.addOption("WindowMinY", m_fWindowMinY);
-	cfg->self.addOption("WindowMaxY", m_fWindowMaxY);
-
-	return cfg;
+	return CW.getConfig();
 }
 //----------------------------------------------------------------------------------------
 

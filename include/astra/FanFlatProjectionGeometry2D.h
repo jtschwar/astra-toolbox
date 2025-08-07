@@ -131,7 +131,7 @@ public:
 
 	/** Create a hard copy. 
 	*/
-	virtual CProjectionGeometry2D* clone();
+	virtual CProjectionGeometry2D* clone() const override;
 
 	/** Returns true if the type of geometry defined in this class is the one specified in _sType.
 	 *
@@ -150,7 +150,7 @@ public:
 	 *
 	 * @return true if this geometry instance is the same as the one specified.
 	 */
-	virtual bool isEqual(CProjectionGeometry2D*) const;
+	virtual bool isEqual(const CProjectionGeometry2D &) const override;
 
 	/** Returns the distance from the origin of the coordinate system to the source.
      *
@@ -171,25 +171,6 @@ public:
      * @return Distance from the source to the detector
      */
 	float32 getSourceDetectorDistance() const;
-
-	/** Get the value for t and theta, based upon the row and column index.
-	 *
-	 * @param _iRow		row index 
-	 * @param _iColumn	column index
-	 * @param _fT		output: value of t
-	 * @param _fTheta	output: value of theta, always lies within the [0,pi[ interval.
-	 */
-	virtual void getRayParams(int _iRow, int _iColumn, float32& _fT, float32& _fTheta) const;
-
-	/**
-	 * Returns a vector describing the direction of a ray belonging to a certain detector
-	 *
-	 * @param _iProjectionIndex index of projection
-	 * @param _iProjectionIndex index of detector
-	 *
-	 * @return a unit vector describing the direction
-	 */
-	virtual CVector3D getProjectionDirection(int _iProjectionIndex, int _iDetectorIndex);
 
 	/** Create a vector geom
 	*/
@@ -217,35 +198,6 @@ inline float32 CFanFlatProjectionGeometry2D::getSourceDetectorDistance() const
 {
 	return (m_fOriginSourceDistance + m_fOriginDetectorDistance);
 }
-
-
-// Get T and Theta
-inline void CFanFlatProjectionGeometry2D::getRayParams(int _iRow, int _iColumn, float32& _fT, float32& _fTheta) const
-{
-	assert(m_bInitialized);
-
-	// get the distance between the center of the detector array and the detector.
-	float32 det_offset = indexToDetectorOffset(_iColumn);
-
-	// get the angle between the center ray of the projection and the projection.
-	float32 alpha = atan(det_offset / getSourceDetectorDistance());
-
-	// calculate t and theta
-	_fT = m_fOriginSourceDistance * sin(alpha);
-	_fTheta = getProjectionAngle(_iRow) + alpha;
-
-	// if theta is larger than pi, flip of the origin
-	if (PI <= _fTheta) {
-		_fTheta -= PI;
-		_fT = -_fT;
-	}
-	// if theta is below 0, flip
-	if (_fTheta < 0) {
-		_fTheta += PI;
-		_fT = -_fT;
-	}
-}
-
 
 
 } // namespace astra

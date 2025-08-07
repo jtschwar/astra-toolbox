@@ -33,6 +33,7 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include "astra/ParallelProjectionGeometry3D.h"
 #include "astra/ParallelVecProjectionGeometry3D.h"
 #include "astra/ConeVecProjectionGeometry3D.h"
+#include "astra/VolumeGeometry3D.h"
 #include "astra/CudaProjector3D.h"
 
 #include "astra/Logging.h"
@@ -42,9 +43,6 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 using namespace std;
 
 namespace astra {
-
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CCudaSirtAlgorithm3D::type = "SIRT3D_CUDA";
 
 //----------------------------------------------------------------------------------------
 // Constructor
@@ -60,9 +58,9 @@ CCudaSirtAlgorithm3D::CCudaSirtAlgorithm3D()
 
 //----------------------------------------------------------------------------------------
 // Constructor with initialization
-CCudaSirtAlgorithm3D::CCudaSirtAlgorithm3D(CProjector3D* _pProjector, 
-								   CFloat32ProjectionData3DMemory* _pProjectionData, 
-								   CFloat32VolumeData3DMemory* _pReconstruction)
+CCudaSirtAlgorithm3D::CCudaSirtAlgorithm3D(CProjector3D* _pProjector,
+								   CFloat32ProjectionData3D* _pProjectionData,
+								   CFloat32VolumeData3D* _pReconstruction)
 {
 	_clear();
 	initialize(_pProjector, _pProjectionData, _pReconstruction);
@@ -114,8 +112,7 @@ void CCudaSirtAlgorithm3D::initializeFromProjector()
 // Initialize - Config
 bool CCudaSirtAlgorithm3D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("CudaSirtAlgorithm3D", this, _cfg);
+	ConfigReader<CAlgorithm> CR("CudaSirtAlgorithm3D", this, _cfg);
 
 
 	// if already initialized, clear first
@@ -128,23 +125,27 @@ bool CCudaSirtAlgorithm3D::initialize(const Config& _cfg)
 		return false;
 	}
 
-	m_fLambda = _cfg.self.getOptionNumerical("Relaxation");
+	bool ok = true;
+
+	ok &= CR.getOptionNumerical("Relaxation", m_fLambda, 1.0f);
 
 	initializeFromProjector();
 
 	// Deprecated options
-	m_iVoxelSuperSampling = (int)_cfg.self.getOptionNumerical("VoxelSuperSampling", m_iVoxelSuperSampling);
-	m_iDetectorSuperSampling = (int)_cfg.self.getOptionNumerical("DetectorSuperSampling", m_iDetectorSuperSampling);
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUindex", m_iGPUIndex);
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUIndex", m_iGPUIndex);
+	ok &= CR.getOptionInt("VoxelSuperSampling", m_iVoxelSuperSampling, m_iVoxelSuperSampling);
+	ok &= CR.getOptionInt("DetectorSuperSampling", m_iDetectorSuperSampling, m_iDetectorSuperSampling);
+	if (CR.hasOption("GPUIndex"))
+		ok &= CR.getOptionInt("GPUIndex", m_iGPUIndex, m_iGPUIndex);
+	else
+		ok &= CR.getOptionInt("GPUindex", m_iGPUIndex, m_iGPUIndex);
+	if (!ok)
+		return false;
 
-	CC.markOptionParsed("VoxelSuperSampling");
-	CC.markOptionParsed("DetectorSuperSampling");
-	CC.markOptionParsed("GPUIndex");
-	if (!_cfg.self.hasOption("GPUIndex"))
-		CC.markOptionParsed("GPUindex");
-
-
+	if (m_pSinogram->getGeometry().isOfType("cyl_cone_vec")
+	    && (m_iDetectorSuperSampling > 1 || m_iVoxelSuperSampling > 1)) {
+		ASTRA_CONFIG_CHECK(false, "SIRT3D_CUDA",
+						   "Detector/voxel supersampling is not supported for cyl_cone_vec geometry.");
+	}
 
 	m_pSirt = new AstraSIRT3d();
 
@@ -158,9 +159,9 @@ bool CCudaSirtAlgorithm3D::initialize(const Config& _cfg)
 
 //----------------------------------------------------------------------------------------
 // Initialize - C++
-bool CCudaSirtAlgorithm3D::initialize(CProjector3D* _pProjector, 
-								  CFloat32ProjectionData3DMemory* _pSinogram, 
-								  CFloat32VolumeData3DMemory* _pReconstruction)
+bool CCudaSirtAlgorithm3D::initialize(CProjector3D* _pProjector,
+								  CFloat32ProjectionData3D* _pSinogram,
+								  CFloat32VolumeData3D* _pReconstruction)
 {
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -183,30 +184,15 @@ bool CCudaSirtAlgorithm3D::initialize(CProjector3D* _pProjector,
 	return m_bIsInitialized;
 }
 
-//---------------------------------------------------------------------------------------
-// Information - All
-map<string,boost::any> CCudaSirtAlgorithm3D::getInformation() 
-{
-	map<string, boost::any> res;
-	return mergeMap<string,boost::any>(CAlgorithm::getInformation(), res);
-};
-
-//---------------------------------------------------------------------------------------
-// Information - Specific
-boost::any CCudaSirtAlgorithm3D::getInformation(std::string _sIdentifier) 
-{
-	return CAlgorithm::getInformation(_sIdentifier);
-};
-
 //----------------------------------------------------------------------------------------
 // Iterate
-void CCudaSirtAlgorithm3D::run(int _iNrIterations)
+bool CCudaSirtAlgorithm3D::run(int _iNrIterations)
 {
 	// check initialized
 	ASTRA_ASSERT(m_bIsInitialized);
 
-	const CProjectionGeometry3D* projgeom = m_pSinogram->getGeometry();
-	const CVolumeGeometry3D& volgeom = *m_pReconstruction->getGeometry();
+	const CProjectionGeometry3D &projgeom = m_pSinogram->getGeometry();
+	const CVolumeGeometry3D &volgeom = m_pReconstruction->getGeometry();
 
 	bool ok = true;
 
@@ -214,7 +200,7 @@ void CCudaSirtAlgorithm3D::run(int _iNrIterations)
 
 		ok &= m_pSirt->setGPUIndex(m_iGPUIndex);
 
-		ok &= m_pSirt->setGeometry(&volgeom, projgeom);
+		ok &= m_pSirt->setGeometry(&volgeom, &projgeom);
 
 		ok &= m_pSirt->enableSuperSampling(m_iVoxelSuperSampling, m_iDetectorSuperSampling);
 
@@ -223,39 +209,35 @@ void CCudaSirtAlgorithm3D::run(int _iNrIterations)
 		if (m_bUseSinogramMask)
 			ok &= m_pSirt->enableSinogramMask();
 
+		ok &= m_pSirt->setRelaxation(m_fLambda);
+
 		ASTRA_ASSERT(ok);
 
 		ok &= m_pSirt->init();
 
 		ASTRA_ASSERT(ok);
 
-		m_pSirt->setRelaxation(m_fLambda);
-
 		m_bAstraSIRTInit = true;
 
 	}
 
-	CFloat32ProjectionData3DMemory* pSinoMem = dynamic_cast<CFloat32ProjectionData3DMemory*>(m_pSinogram);
-	ASTRA_ASSERT(pSinoMem);
+	ASTRA_ASSERT(m_pSinogram->isFloat32Memory());
 
-	ok = m_pSirt->setSinogram(pSinoMem->getDataConst(), m_pSinogram->getGeometry()->getDetectorColCount());
+	ok = m_pSirt->setSinogram(m_pSinogram->getFloat32Memory(), m_pSinogram->getGeometry().getDetectorColCount());
 
 	ASTRA_ASSERT(ok);
 
 	if (m_bUseReconstructionMask) {
-		CFloat32VolumeData3DMemory* pRMaskMem = dynamic_cast<CFloat32VolumeData3DMemory*>(m_pReconstructionMask);
-		ASTRA_ASSERT(pRMaskMem);
-		ok &= m_pSirt->setVolumeMask(pRMaskMem->getDataConst(), volgeom.getGridColCount());
+		ASTRA_ASSERT(m_pReconstructionMask->isFloat32Memory());
+		ok &= m_pSirt->setVolumeMask(m_pReconstructionMask->getFloat32Memory(), volgeom.getGridColCount());
 	}
 	if (m_bUseSinogramMask) {
-		CFloat32ProjectionData3DMemory* pSMaskMem = dynamic_cast<CFloat32ProjectionData3DMemory*>(m_pSinogramMask);
-		ASTRA_ASSERT(pSMaskMem);
-		ok &= m_pSirt->setSinogramMask(pSMaskMem->getDataConst(), m_pSinogramMask->getGeometry()->getDetectorColCount());
+		ASTRA_ASSERT(m_pSinogramMask->isFloat32Memory());
+		ok &= m_pSirt->setSinogramMask(m_pSinogramMask->getFloat32Memory(), m_pSinogramMask->getGeometry().getDetectorColCount());
 	}
 
-	CFloat32VolumeData3DMemory* pReconMem = dynamic_cast<CFloat32VolumeData3DMemory*>(m_pReconstruction);
-	ASTRA_ASSERT(pReconMem);
-	ok &= m_pSirt->setStartReconstruction(pReconMem->getDataConst(),
+	ASTRA_ASSERT(m_pReconstruction->isFloat32Memory());
+	ok &= m_pSirt->setStartReconstruction(m_pReconstruction->getFloat32Memory(),
 	                                      volgeom.getGridColCount());
 
 	ASTRA_ASSERT(ok);
@@ -268,11 +250,11 @@ void CCudaSirtAlgorithm3D::run(int _iNrIterations)
 	ok &= m_pSirt->iterate(_iNrIterations);
 	ASTRA_ASSERT(ok);
 
-	ok &= m_pSirt->getReconstruction(pReconMem->getData(),
+	ok &= m_pSirt->getReconstruction(m_pReconstruction->getFloat32Memory(),
 	                                 volgeom.getGridColCount());
 	ASTRA_ASSERT(ok);
 
-
+	return ok;
 }
 //----------------------------------------------------------------------------------------
 bool CCudaSirtAlgorithm3D::getResidualNorm(float32& _fNorm)

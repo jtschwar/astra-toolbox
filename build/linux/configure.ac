@@ -23,7 +23,7 @@ dnl along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 dnl
 dnl -----------------------------------------------------------------------
 
-AC_INIT(astra, 2.1.2)
+AC_INIT([astra],[2.3.0])
 AC_CONFIG_SRCDIR([Makefile.in])
 LT_INIT([disable-static])
 
@@ -39,7 +39,6 @@ AC_CANONICAL_HOST
 AC_PROG_CC
 AC_PROG_CXX
 AC_PROG_INSTALL
-AC_PROG_LIBTOOL
 AC_PROG_MAKE_SET
 
 AC_LANG([C++])
@@ -72,17 +71,6 @@ fi
 AC_SUBST(HAVEBOOSTUTF)
 AC_SUBST(LIBS_BOOSTUTF)
 
-BOOSTok=yes
-AC_CHECK_HEADER([boost/any.hpp],[],[BOOSTok=no],[])
-dnl AC_CHECK_HEADER([boost/thread.hpp],[],[BOOSTok=no],[])
-dnl AC_CHECK_HEADER([boost/bind.hpp],[],[BOOSTok=no],[])
-AC_CHECK_HEADER([boost/static_assert.hpp],[],[BOOSTok=no],[])
-AC_CHECK_HEADER([boost/throw_exception.hpp],[],[BOOSTok=no],[])
-
-if test x$BOOSTok = xno; then
-  AC_MSG_ERROR([boost not found])
-fi
-
 # nvcc, cuda
 
 AC_ARG_WITH(cuda, [[  --with-cuda=path        path of CUDA (optional)]],,)
@@ -109,6 +97,7 @@ if test x"$NVCC" != xno; then
   AC_CHECK_LIB(cudart,cudaMalloc, ,HAVECUDA=no)
   AC_CHECK_LIB(cufft,cufftPlan1d, ,HAVECUDA=no)
 
+  LIBS="$SAVED_LIBS"
   LDFLAGS="$BACKUP_CUDA_LDFLAGS"
   unset BACKUP_CUDA_LDFLAGS
   # TODO: check for cuda headers?
@@ -122,18 +111,11 @@ if test x"$HAVECUDA" = xyes; then
   AC_MSG_RESULT($HAVECUDA)
 fi
 
-if test x"$HAVECUDA" = xyes; then
-  AC_MSG_CHECKING([if boost and CUDA versions are compatible])
-  ASTRA_CHECK_CUDA_BOOST(AC_MSG_RESULT([yes]),[
-    AC_MSG_RESULT([no])
-    AC_MSG_ERROR([Boost and CUDA versions are incompatible. You probably have to upgrade boost.])
-  ])
-fi
-
-AC_ARG_WITH(cuda_compute, [[  --with-cuda-compute=archs  comma separated list of CUDA compute models (optional)]],,)
+AC_ARG_WITH(cuda_compute, [[  --with-cuda-compute=archs  list of compute models, or all/all-major/native (optional)]],,)
 if test x"$HAVECUDA" = xyes; then
   AC_MSG_CHECKING([for nvcc archs])
-  dnl 10 11 12 13 20 21 30 32 35 37 50 52 53 60 61 62 70 72 75 80 86
+  dnl 10 11 12 13 20 21 30 32 35 37 50 52 53 60 61 62 70 72 75 80 86 87 89
+  dnl 90 90a 100 100a 101 101a 120 120a
   dnl
   dnl Build cubin for range of platforms, and ptx for newest for forward compat.
   dnl Build cubin x.0 for older platforms, and all x.y for "recent" ones.
@@ -146,11 +128,31 @@ if test x"$HAVECUDA" = xyes; then
   dnl "Binary compatibility is guaranteed from one minor revision to the next one, but not from one minor revision to the previous one or across major revisions."
   dnl
 
-  if test x"$with_cuda_compute" = x; then
-    with_cuda_compute="20,30,35,50,60,70,75,80,86"
+  NVCCARCHS_MAJOR=no
+  if test x"$with_cuda_compute" = xall-major -o x"$with_cuda_compute" = xall -o x"$with_cuda_compute" = xnative -o x"$with_cuda_compute" = x; then
+    nvcc_arch_option="$with_cuda_compute"
+    if test x"$with_cuda_compute" = x; then
+      nvcc_arch_option=all-major
+    fi
+    ASTRA_CHECK_NVCC_ARCH_OPTION([$nvcc_arch_option],NVCCARCHS_OPTION,NVCCFLAGS_EXTRA)
+
+    if test x$NVCCARCHS_OPTION = xno; then
+      if test x"$with_cuda_compute" != x; then
+        AC_MSG_ERROR([requested arch flag ($with_cuda_compute) not supported])
+      fi
+    fi
   fi
-  ASTRA_FIND_NVCC_ARCHS([$with_cuda_compute],NVCCFLAGS_EXTRA,NVCCARCHS)
-  AC_MSG_RESULT([$NVCCARCHS])
+
+  if test x$NVCCARCHS_OPTION = xyes; then
+    AC_MSG_RESULT([$nvcc_arch_option])
+  else
+    if test x"$with_cuda_compute" = x; then
+      with_cuda_compute="20,30,35,50,60,70,80,90,100,120"
+    fi
+    ASTRA_FIND_NVCC_ARCHS([$with_cuda_compute],NVCCFLAGS_EXTRA,NVCCARCHS)
+
+    AC_MSG_RESULT([$NVCCARCHS])
+  fi
 fi
 
 AC_ARG_VAR(NVCCFLAGS, [CUDA nvcc flags])
@@ -167,6 +169,57 @@ AC_SUBST(HAVECUDA)
 AC_SUBST(LDFLAGS_CUDA)
 AC_SUBST(CPPFLAGS_CUDA)
 AC_SUBST(NVCCFLAGS_EXTRA)
+
+
+# AMD hip
+
+AC_ARG_WITH(hip, [[  --with-hip=path         path of AMD HIP (optional)]],,)
+
+dnl Currently we require this to be explicitly set, even if hipcc is in PATH
+if test x"$with_hip" != xno -a x"$with_hip" != x; then
+  HIPCC_PATH=$PATH
+  if test x"$with_hip" != x -a x"$with_hip" != xyes; then
+    HIPCC_PATH="$with_hip/bin:$HIPCC_PATH"
+  fi
+  AC_PATH_PROG([HIPCC], [hipcc], [no], [$HIPCC_PATH])
+else
+  HIPCC=no
+fi
+
+HAVEHIP=no
+if test x"$HIPCC" != xno; then
+  HAVEHIP=yes
+  BACKUP_HIP_LDFLAGS="$LDFLAGS"
+  if test x"$with_hip" != x -a x"$with_hip" != xyes; then
+    test -d $with_hip/lib64 && LDFLAGS_HIP="-L$with_hip/lib64" || LDFLAGS_HIP="-L$with_hip/lib"
+    CPPFLAGS_HIP="-I$with_hip/include"
+    LDFLAGS="$LDFLAGS $LDFLAGS_HIP"
+  fi
+  AC_CHECK_LIB(amdhip64,hipMalloc, ,HAVEHIP=no)
+  AC_CHECK_LIB(hipfft,hipfftPlan1d, ,HAVEHIP=no)
+
+  LIBS="$SAVED_LIBS"
+  LDFLAGS="$BACKUP_HIP_LDFLAGS"
+  unset BACKUP_HIP_LDFLAGS
+  # TODO: check for HIP headers?
+
+  AC_SUBST(HIPCC)
+fi
+
+dnl Decide if there is specific functionality or any flag to test for hipcc
+dnl if test x"$HAVEHIP" = xyes; then
+  dnl AC_MSG_CHECKING([if hipcc works])
+  dnl ASTRA_CHECK_HIPCC(HAVEHIP,HIPCCFLAGS_EXTRA)
+  dnl AC_MSG_RESULT($HAVEHIP)
+dnl fi
+
+AC_SUBST(HAVEHIP)
+AC_SUBST(LDFLAGS_HIP)
+AC_SUBST(CPPFLAGS_HIP)
+
+if test x"$HAVEHIP$HAVECUDA" = xyesyes; then
+  AC_MSG_ERROR(NVIDIA CUDA and AMD HIP can currently not both be enabled)
+fi
 
 
 # mex, matlab
@@ -254,6 +307,13 @@ if test x"$with_python" != x -a x"$with_python" != xno; then
   AC_MSG_RESULT([$PYTHON])
   HAVEPYTHON=yes
   AC_SUBST(PYTHON)
+  AC_MSG_CHECKING(for setuptools.build_meta)
+  ASTRA_TRY_PYTHON([import setuptools.build_meta],,HAVEPYTHON=no)
+  if test x$HAVEPYTHON = xno; then
+    AC_MSG_RESULT(no)
+    AC_MSG_ERROR(You need setuptools supporting build_meta to install the ASTRA toolbox for Python)
+  fi
+  AC_MSG_RESULT(yes)
   AC_MSG_CHECKING(for numpy module)
   ASTRA_TRY_PYTHON([import numpy],,HAVEPYTHON=no)
   if test x$HAVEPYTHON = xno; then
@@ -262,21 +322,10 @@ if test x"$with_python" != x -a x"$with_python" != xno; then
   fi
   AC_MSG_RESULT(yes)
   AC_MSG_CHECKING(for Cython module)
-  ASTRA_TRY_PYTHON([
-import Cython
-from pkg_resources import parse_version
-assert(parse_version(Cython.__version__) >= parse_version("0.13"))
-],,HAVEPYTHON=no)
+  ASTRA_TRY_PYTHON([import Cython],,HAVEPYTHON=no)
   if test x$HAVEPYTHON = xno; then
     AC_MSG_RESULT(no)
-    AC_MSG_ERROR(You need the Cython module (version >=0.13) to use the ASTRA toolbox in Python)
-  fi
-  AC_MSG_RESULT(yes)
-  AC_MSG_CHECKING(for six module)
-  ASTRA_TRY_PYTHON([import six],,HAVEPYTHON=no)
-  if test x$HAVEPYTHON = xno; then
-    AC_MSG_RESULT(no)
-    AC_MSG_ERROR(You need the six module to use the ASTRA toolbox in Python)
+    AC_MSG_ERROR(You need the Cython module to install the ASTRA toolbox for Python)
   fi
   AC_MSG_RESULT(yes)
   AC_MSG_CHECKING(for scipy module)
@@ -284,6 +333,15 @@ assert(parse_version(Cython.__version__) >= parse_version("0.13"))
   if test x$HAVEPYTHON = xno; then
     AC_MSG_RESULT(no)
     AC_MSG_ERROR(You need the scipy module to use the ASTRA toolbox in Python)
+  fi
+  AC_MSG_RESULT(yes)
+  AC_MSG_CHECKING(for tomli/tomllib modules)
+  ASTRA_TRY_PYTHON([import tomllib],,HAVEPYTHON=no)
+  if test x$HAVEPYTHON = xno; then
+    ASTRA_TRY_PYTHON([import tomli],HAVEPYTHON=yes,HAVEPYTHON=no)
+    if test x$HAVEPYTHON = xno; then
+      AC_MSG_ERROR(You need the tomli or tomllib module to install the ASTRA toolbox for Python)
+    fi
   fi
   AC_MSG_RESULT(yes)
 fi
@@ -344,10 +402,13 @@ AC_OUTPUT
 
 echo
 echo "Summary of ASTRA Toolbox build options:"
-echo "  CUDA  : $HAVECUDA"
-echo "  Matlab: $HAVEMATLAB"
-echo "  Octave: $HAVEOCTAVE"
-echo "  Python: $HAVEPYTHON"
+echo "  NVIDIA CUDA: $HAVECUDA"
+if test x$HAVEHIP = xyes; then
+  echo "  AMD HIP    : yes (experimental!)"
+fi
+echo "  Matlab     : $HAVEMATLAB"
+echo "  Octave     : $HAVEOCTAVE"
+echo "  Python     : $HAVEPYTHON"
 echo
 echo "Installation type: $with_install_type"
 case $with_install_type in

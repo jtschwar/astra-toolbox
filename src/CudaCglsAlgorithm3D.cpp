@@ -33,6 +33,7 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include "astra/ConeProjectionGeometry3D.h"
 #include "astra/ParallelVecProjectionGeometry3D.h"
 #include "astra/ConeVecProjectionGeometry3D.h"
+#include "astra/VolumeGeometry3D.h"
 
 #include "astra/Logging.h"
 
@@ -41,9 +42,6 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 using namespace std;
 
 namespace astra {
-
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CCudaCglsAlgorithm3D::type = "CGLS3D_CUDA";
 
 //----------------------------------------------------------------------------------------
 // Constructor
@@ -58,9 +56,9 @@ CCudaCglsAlgorithm3D::CCudaCglsAlgorithm3D()
 
 //----------------------------------------------------------------------------------------
 // Constructor with initialization
-CCudaCglsAlgorithm3D::CCudaCglsAlgorithm3D(CProjector3D* _pProjector, 
-								   CFloat32ProjectionData3DMemory* _pProjectionData, 
-								   CFloat32VolumeData3DMemory* _pReconstruction)
+CCudaCglsAlgorithm3D::CCudaCglsAlgorithm3D(CProjector3D* _pProjector,
+								   CFloat32ProjectionData3D* _pProjectionData,
+								   CFloat32VolumeData3D* _pReconstruction)
 {
 	_clear();
 	initialize(_pProjector, _pProjectionData, _pReconstruction);
@@ -112,8 +110,7 @@ void CCudaCglsAlgorithm3D::initializeFromProjector()
 // Initialize - Config
 bool CCudaCglsAlgorithm3D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("CudaCglsAlgorithm3D", this, _cfg);
+	ConfigReader<CAlgorithm> CR("CudaCglsAlgorithm3D", this, _cfg);
 
 
 	// if already initialized, clear first
@@ -128,18 +125,23 @@ bool CCudaCglsAlgorithm3D::initialize(const Config& _cfg)
 
 	initializeFromProjector();
 
+	bool ok = true;
+
 	// Deprecated options
-	m_iVoxelSuperSampling = (int)_cfg.self.getOptionNumerical("VoxelSuperSampling", m_iVoxelSuperSampling);
-	m_iDetectorSuperSampling = (int)_cfg.self.getOptionNumerical("DetectorSuperSampling", m_iDetectorSuperSampling);
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUindex", m_iGPUIndex);
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUIndex", m_iGPUIndex);
-	CC.markOptionParsed("VoxelSuperSampling");
-	CC.markOptionParsed("DetectorSuperSampling");
-	CC.markOptionParsed("GPUIndex");
-	if (!_cfg.self.hasOption("GPUIndex"))
-		CC.markOptionParsed("GPUindex");
+	ok &= CR.getOptionInt("VoxelSuperSampling", m_iVoxelSuperSampling, m_iVoxelSuperSampling);
+	ok &= CR.getOptionInt("DetectorSuperSampling", m_iDetectorSuperSampling, m_iDetectorSuperSampling);
+	if (CR.hasOption("GPUIndex"))
+		ok &= CR.getOptionInt("GPUIndex", m_iGPUIndex, m_iGPUIndex);
+	else
+		ok &= CR.getOptionInt("GPUindex", m_iGPUIndex, m_iGPUIndex);
+	if (!ok)
+		return false;
 
-
+	if (m_pSinogram->getGeometry().isOfType("cyl_cone_vec")
+	    && (m_iDetectorSuperSampling > 1 || m_iVoxelSuperSampling > 1)) {
+		ASTRA_CONFIG_CHECK(false, "CGLS3D_CUDA",
+						   "Detector/voxel supersampling is not supported for cyl_cone_vec geometry.");
+	}
 
 	m_pCgls = new AstraCGLS3d();
 
@@ -153,9 +155,9 @@ bool CCudaCglsAlgorithm3D::initialize(const Config& _cfg)
 
 //----------------------------------------------------------------------------------------
 // Initialize - C++
-bool CCudaCglsAlgorithm3D::initialize(CProjector3D* _pProjector, 
-								  CFloat32ProjectionData3DMemory* _pSinogram, 
-								  CFloat32VolumeData3DMemory* _pReconstruction)
+bool CCudaCglsAlgorithm3D::initialize(CProjector3D* _pProjector,
+								  CFloat32ProjectionData3D* _pSinogram,
+								  CFloat32VolumeData3D* _pReconstruction)
 {
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -178,30 +180,15 @@ bool CCudaCglsAlgorithm3D::initialize(CProjector3D* _pProjector,
 	return m_bIsInitialized;
 }
 
-//---------------------------------------------------------------------------------------
-// Information - All
-map<string,boost::any> CCudaCglsAlgorithm3D::getInformation() 
-{
-	map<string, boost::any> res;
-	return mergeMap<string,boost::any>(CAlgorithm::getInformation(), res);
-};
-
-//---------------------------------------------------------------------------------------
-// Information - Specific
-boost::any CCudaCglsAlgorithm3D::getInformation(std::string _sIdentifier) 
-{
-	return CAlgorithm::getInformation(_sIdentifier);
-};
-
 //----------------------------------------------------------------------------------------
 // Iterate
-void CCudaCglsAlgorithm3D::run(int _iNrIterations)
+bool CCudaCglsAlgorithm3D::run(int _iNrIterations)
 {
 	// check initialized
 	ASTRA_ASSERT(m_bIsInitialized);
 
-	const CProjectionGeometry3D* projgeom = m_pSinogram->getGeometry();
-	const CVolumeGeometry3D& volgeom = *m_pReconstruction->getGeometry();
+	const CProjectionGeometry3D& projgeom = m_pSinogram->getGeometry();
+	const CVolumeGeometry3D& volgeom = m_pReconstruction->getGeometry();
 
 	bool ok = true;
 
@@ -209,7 +196,7 @@ void CCudaCglsAlgorithm3D::run(int _iNrIterations)
 
 		ok &= m_pCgls->setGPUIndex(m_iGPUIndex);
 
-		ok &= m_pCgls->setGeometry(&volgeom, projgeom);
+		ok &= m_pCgls->setGeometry(&volgeom, &projgeom);
 
 		ok &= m_pCgls->enableSuperSampling(m_iVoxelSuperSampling, m_iDetectorSuperSampling);
 
@@ -230,29 +217,26 @@ void CCudaCglsAlgorithm3D::run(int _iNrIterations)
 
 	}
 
-	CFloat32ProjectionData3DMemory* pSinoMem = dynamic_cast<CFloat32ProjectionData3DMemory*>(m_pSinogram);
-	ASTRA_ASSERT(pSinoMem);
+	ASTRA_ASSERT(m_pSinogram->isFloat32Memory());
 
-	ok = m_pCgls->setSinogram(pSinoMem->getDataConst(), m_pSinogram->getGeometry()->getDetectorColCount());
+	ok = m_pCgls->setSinogram(m_pSinogram->getFloat32Memory(), m_pSinogram->getGeometry().getDetectorColCount());
 
 	ASTRA_ASSERT(ok);
 
 	if (m_bUseReconstructionMask) {
-		CFloat32VolumeData3DMemory* pRMaskMem = dynamic_cast<CFloat32VolumeData3DMemory*>(m_pReconstructionMask);
-		ASTRA_ASSERT(pRMaskMem);
-		ok &= m_pCgls->setVolumeMask(pRMaskMem->getDataConst(), volgeom.getGridColCount());
+		ASTRA_ASSERT(m_pReconstructionMask->isFloat32Memory());
+		ok &= m_pCgls->setVolumeMask(m_pReconstructionMask->getFloat32Memory(), volgeom.getGridColCount());
 	}
 #if 0
 	if (m_bUseSinogramMask) {
 		CFloat32ProjectionData3DMemory* pSMaskMem = dynamic_cast<CFloat32ProjectionData3DMemory*>(m_pSinogramMask);
-		ASTRA_ASSERT(pSMaskMem);
-		ok &= m_pCgls->setSinogramMask(pSMaskMem->getDataConst(), m_pSinogramMask->getGeometry()->getDetectorColCount());
+		ASTRA_ASSERT(m_pSinogramMask->isFloat32Memory());
+		ok &= m_pCgls->setSinogramMask(m_pSinogramMask->getFloat32Memory(), m_pSinogramMask->getGeometry()->getDetectorColCount());
 	}
 #endif
 
-	CFloat32VolumeData3DMemory* pReconMem = dynamic_cast<CFloat32VolumeData3DMemory*>(m_pReconstruction);
-	ASTRA_ASSERT(pReconMem);
-	ok &= m_pCgls->setStartReconstruction(pReconMem->getDataConst(),
+	ASTRA_ASSERT(m_pReconstruction->isFloat32Memory());
+	ok &= m_pCgls->setStartReconstruction(m_pReconstruction->getFloat32Memory(),
 	                                      volgeom.getGridColCount());
 
 	ASTRA_ASSERT(ok);
@@ -267,11 +251,11 @@ void CCudaCglsAlgorithm3D::run(int _iNrIterations)
 	ok &= m_pCgls->iterate(_iNrIterations);
 	ASTRA_ASSERT(ok);
 
-	ok &= m_pCgls->getReconstruction(pReconMem->getData(),
+	ok &= m_pCgls->getReconstruction(m_pReconstruction->getFloat32Memory(),
 	                                 volgeom.getGridColCount());
 	ASTRA_ASSERT(ok);
 
-
+	return ok;
 }
 //----------------------------------------------------------------------------------------
 bool CCudaCglsAlgorithm3D::getResidualNorm(float32& _fNorm)

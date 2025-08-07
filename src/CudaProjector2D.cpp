@@ -27,13 +27,10 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/CudaProjector2D.h"
 
+#include "astra/Logging.h"
 
 namespace astra
 {
-
-// type of the projector, needed to register with CProjectorFactory
-std::string CCudaProjector2D::type = "cuda";
-
 
 //----------------------------------------------------------------------------------------
 // Default constructor
@@ -44,12 +41,12 @@ CCudaProjector2D::CCudaProjector2D()
 
 //----------------------------------------------------------------------------------------
 // Constructor
-CCudaProjector2D::CCudaProjector2D(CParallelProjectionGeometry2D* _pProjectionGeometry,
-                                   CVolumeGeometry2D* _pReconstructionGeometry)
+CCudaProjector2D::CCudaProjector2D(const CParallelProjectionGeometry2D& _pProjectionGeometry,
+                                   const CVolumeGeometry2D& _pReconstructionGeometry)
 {
     _clear();
-    m_pProjectionGeometry = _pProjectionGeometry->clone();
-    m_pVolumeGeometry = _pReconstructionGeometry->clone();
+    m_pProjectionGeometry = _pProjectionGeometry.clone();
+    m_pVolumeGeometry = _pReconstructionGeometry.clone();
     m_bIsInitialized = true;
 }
 
@@ -102,8 +99,7 @@ bool CCudaProjector2D::_check()
 // Initialize, use a Config object
 bool CCudaProjector2D::initialize(const Config& _cfg)
 {
-	assert(_cfg.self);
-	ConfigStackCheck<CProjector2D> CC("CudaProjector2D", this, _cfg);
+	ConfigReader<CProjector2D> CR("CudaProjector2D", this, _cfg);
 
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -117,32 +113,26 @@ bool CCudaProjector2D::initialize(const Config& _cfg)
 
 	// TODO: Check the projection geometry is a supported type
 
-	XMLNode node = _cfg.self.getSingleNode("ProjectionKernel");
-	m_projectionKernel = ker2d_default;
-	if (node) {
-		std::string sProjKernel = node.getContent();
-
-		if (sProjKernel == "default") {
-
-		} else {
-			return false;
-		}
+	std::string sProjKernel;
+	CR.getString("ProjectionKernel", sProjKernel, "default");
+	if (sProjKernel == "default") {
+		m_projectionKernel = ker2d_default;
+	} else {
+		ASTRA_ERROR("Unknown ProjectionKernel \"%s\"", sProjKernel.c_str());
+		return false;
 	}
-	CC.markNodeParsed("ProjectionKernel");
 
-	m_iVoxelSuperSampling = (int)_cfg.self.getOptionNumerical("VoxelSuperSampling", 1);
-	CC.markOptionParsed("VoxelSuperSampling");
- 
-	m_iDetectorSuperSampling = (int)_cfg.self.getOptionNumerical("DetectorSuperSampling", 1);
-	CC.markOptionParsed("DetectorSuperSampling");
+	bool ok = true;
 
-	// GPU number
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUindex", -1);
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUIndex", m_iGPUIndex);
-	CC.markOptionParsed("GPUIndex");
-	if (!_cfg.self.hasOption("GPUIndex"))
-		CC.markOptionParsed("GPUindex");
+	ok &= CR.getOptionInt("VoxelSuperSampling", m_iVoxelSuperSampling, 1);
+	ok &= CR.getOptionInt("DetectorSuperSampling", m_iDetectorSuperSampling, 1);
 
+	if (CR.hasOption("GPUIndex"))
+		ok &= CR.getOptionInt("GPUIndex", m_iGPUIndex, -1);
+	else
+		ok &= CR.getOptionInt("GPUindex", m_iGPUIndex, -1);
+	if (!ok)
+		return false;
 
 	m_bIsInitialized = _check();
 	return m_bIsInitialized;
@@ -151,7 +141,7 @@ bool CCudaProjector2D::initialize(const Config& _cfg)
 
 std::string CCudaProjector2D::description() const
 {
-	return "";
+	return CCudaProjector2D::type;
 }
 
 } // end namespace

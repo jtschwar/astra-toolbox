@@ -29,7 +29,7 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include <iostream>
 #include <iomanip>
-#include <math.h>
+#include <cmath>
 
 #include "astra/AstraObjectManager.h"
 #include "astra/ParallelBeamLineKernelProjector2D.h"
@@ -44,8 +44,6 @@ namespace astra {
 
 #include "astra/Projector2DImpl.inl"
 
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CFilteredBackProjectionAlgorithm::type = "FBP";
 const int FFT = 1;
 const int IFFT = -1;
 
@@ -82,8 +80,7 @@ void CFilteredBackProjectionAlgorithm::clear()
 	m_pReconstruction = NULL;
 	m_bIsInitialized = false;
 
-	delete[] m_filterConfig.m_pfCustomFilter;
-	m_filterConfig.m_pfCustomFilter = 0;
+	m_filterConfig.m_pfCustomFilter.clear();
 }
 
 
@@ -91,83 +88,28 @@ void CFilteredBackProjectionAlgorithm::clear()
 // Initialize, use a Config object
 bool CFilteredBackProjectionAlgorithm::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("FilteredBackProjectionAlgorithm", this, _cfg);
+	ConfigReader<CAlgorithm> CR("FilteredBackProjectionAlgorithm", this, _cfg);
+
+	bool ok = true;
 	int id = -1;
-	
-	// projector
-	XMLNode node = _cfg.self.getSingleNode("ProjectorId");
-	ASTRA_CONFIG_CHECK(node, "FilteredBackProjection", "No ProjectorId tag specified.");
-	id = StringUtil::stringToInt(node.getContent(), -1);
+
+	ok &= CR.getRequiredID("ProjectorId", id);
 	m_pProjector = CProjector2DManager::getSingleton().get(id);
-	CC.markNodeParsed("ProjectorId");
 
-	// sinogram data
-	node = _cfg.self.getSingleNode("ProjectionDataId");
-	ASTRA_CONFIG_CHECK(node, "FilteredBackProjection", "No ProjectionDataId tag specified.");
-	id = StringUtil::stringToInt(node.getContent(), -1);
+	ok &= CR.getRequiredID("ProjectionDataId", id);
 	m_pSinogram = dynamic_cast<CFloat32ProjectionData2D*>(CData2DManager::getSingleton().get(id));
-	CC.markNodeParsed("ProjectionDataId");
 
-	// volume data
-	node = _cfg.self.getSingleNode("ReconstructionDataId");
-	ASTRA_CONFIG_CHECK(node, "FilteredBackProjection", "No ReconstructionDataId tag specified.");
-	id = StringUtil::stringToInt(node.getContent(), -1);
+	ok &= CR.getRequiredID("ReconstructionDataId", id);
 	m_pReconstruction = dynamic_cast<CFloat32VolumeData2D*>(CData2DManager::getSingleton().get(id));
-	CC.markNodeParsed("ReconstructionDataId");
 
-	node = _cfg.self.getSingleNode("ProjectionIndex");
-	if (node) 
-	{
-		vector<float32> projectionIndex;
-		try {
-			projectionIndex = node.getContentNumericalArray();
-		} catch (const StringUtil::bad_cast &e) {
-			ASTRA_CONFIG_CHECK(false, "FilteredBackProjection", "ProjectionIndex must be a numerical vector.");
-		}
-
-		int angleCount = projectionIndex.size();
-		int detectorCount = m_pProjector->getProjectionGeometry()->getDetectorCount();
-
-		// TODO: There is no need to allocate this. Better just
-		// create the CFloat32ProjectionData2D object directly, and use its
-		// memory.
-		float32 * sinogramData2D = new float32[angleCount* detectorCount];
-
-		float32 * projectionAngles = new float32[angleCount];
-		float32 detectorWidth = m_pProjector->getProjectionGeometry()->getDetectorWidth();
-
-		for (int i = 0; i < angleCount; i ++) {
-			if (projectionIndex[i] > m_pProjector->getProjectionGeometry()->getProjectionAngleCount() -1 )
-			{
-				delete[] sinogramData2D;
-				delete[] projectionAngles;
-				ASTRA_ERROR("Invalid Projection Index");
-				return false;
-			} else {
-				int orgIndex = (int)projectionIndex[i];
-
-				for (int iDetector=0; iDetector < detectorCount; iDetector++) 
-				{
-					sinogramData2D[i*detectorCount+ iDetector] = m_pSinogram->getData2D()[orgIndex][iDetector];
-				}
-				projectionAngles[i] = m_pProjector->getProjectionGeometry()->getProjectionAngle((int)projectionIndex[i] );
-
-			}
-		}
-
-		CParallelProjectionGeometry2D * pg = new CParallelProjectionGeometry2D(angleCount, detectorCount,detectorWidth,projectionAngles);
-		m_pProjector = new CParallelBeamLineKernelProjector2D(pg,m_pReconstruction->getGeometry());
-		m_pSinogram = new CFloat32ProjectionData2D(pg, sinogramData2D);
-
-		delete[] sinogramData2D;
-		delete[] projectionAngles;
+	if (CR.has("ProjectionIndex")) {
+		ASTRA_ERROR("ProjectionIndex is no longer available. Manually adjust the sinogram instead.");
+		return false;
 	}
-	CC.markNodeParsed("ProjectionIndex");
 
 	m_filterConfig = getFilterConfigForAlgorithm(_cfg, this);
 
-	const CParallelProjectionGeometry2D* parprojgeom = dynamic_cast<CParallelProjectionGeometry2D*>(m_pSinogram->getGeometry());
+	const CParallelProjectionGeometry2D* parprojgeom = dynamic_cast<const CParallelProjectionGeometry2D*>(&m_pSinogram->getGeometry());
 	if (!parprojgeom) {
 		ASTRA_ERROR("FBP currently only supports parallel projection geometries.");
 		return false;
@@ -179,37 +121,6 @@ bool CFilteredBackProjectionAlgorithm::initialize(const Config& _cfg)
 	m_bIsInitialized = _check();
 	return m_bIsInitialized;
 }
-
-//---------------------------------------------------------------------------------------
-// Get Information - all
-map<string,boost::any> CFilteredBackProjectionAlgorithm::getInformation() 
-{
-	map<string, boost::any> result;
-	result["ProjectorId"] = getInformation("ProjectorId");
-	result["ProjectionDataId"] = getInformation("ProjectionDataId");
-	result["VolumeDataId"] = getInformation("VolumeDataId");
-	return mergeMap<string,boost::any>(CAlgorithm::getInformation(), result);
-};
-
-//---------------------------------------------------------------------------------------
-// Get Information - specific
-boost::any CFilteredBackProjectionAlgorithm::getInformation(std::string _sIdentifier) 
-{
-	if (_sIdentifier == "ProjectorId") {
-		int iIndex = CProjector2DManager::getSingleton().getIndex(m_pProjector);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	} else if (_sIdentifier == "ProjectionDataId") {
-		int iIndex = CData2DManager::getSingleton().getIndex(m_pSinogram);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	} else if (_sIdentifier == "VolumeDataId") {
-		int iIndex = CData2DManager::getSingleton().getIndex(m_pReconstruction);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	}
-	return CAlgorithm::getInformation(_sIdentifier);
-};
 
 //----------------------------------------------------------------------------------------
 // Initialize
@@ -243,10 +154,10 @@ bool CFilteredBackProjectionAlgorithm::_check()
 
 	if((m_filterConfig.m_eType == FILTER_PROJECTION) || (m_filterConfig.m_eType == FILTER_SINOGRAM) || (m_filterConfig.m_eType == FILTER_RPROJECTION) || (m_filterConfig.m_eType == FILTER_RSINOGRAM))
 	{
-		ASTRA_CONFIG_CHECK(m_filterConfig.m_pfCustomFilter, "FBP", "Invalid filter pointer.");
+		ASTRA_CONFIG_CHECK(!m_filterConfig.m_pfCustomFilter.empty(), "FBP", "Invalid filter pointer.");
 	}
 
-	ASTRA_CONFIG_CHECK(checkCustomFilterSize(m_filterConfig, *m_pSinogram->getGeometry()), "FBP", "Filter size mismatch");
+	ASTRA_CONFIG_CHECK(checkCustomFilterSize(m_filterConfig, m_pSinogram->getGeometry()), "FBP", "Filter size mismatch");
 
 	// success
 	return true;
@@ -255,7 +166,7 @@ bool CFilteredBackProjectionAlgorithm::_check()
 
 //----------------------------------------------------------------------------------------
 // Iterate
-void CFilteredBackProjectionAlgorithm::run(int _iNrIterations)
+bool CFilteredBackProjectionAlgorithm::run(int _iNrIterations)
 {
 	ASTRA_ASSERT(m_bIsInitialized);
 
@@ -269,14 +180,16 @@ void CFilteredBackProjectionAlgorithm::run(int _iNrIterations)
 	            DefaultBPPolicy(m_pReconstruction, &filteredSinogram));
 
 	// Scale data
-	const CVolumeGeometry2D& volGeom = *m_pProjector->getVolumeGeometry();
-	const CProjectionGeometry2D& projGeom = *m_pProjector->getProjectionGeometry();
+	const CVolumeGeometry2D& volGeom = m_pProjector->getVolumeGeometry();
+	const CProjectionGeometry2D& projGeom = m_pProjector->getProjectionGeometry();
 
 	int iAngleCount = projGeom.getProjectionAngleCount();
 	float fPixelArea = volGeom.getPixelArea();
 	(*m_pReconstruction) *= PI/(2*iAngleCount*fPixelArea);
 
 	m_pReconstruction->updateStatistics();
+
+	return true;
 }
 
 
@@ -291,8 +204,8 @@ void CFilteredBackProjectionAlgorithm::performFiltering(CFloat32ProjectionData2D
 	if (m_filterConfig.m_eType == FILTER_NONE)
 		return;
 
-	int iAngleCount = m_pProjector->getProjectionGeometry()->getProjectionAngleCount();
-	int iDetectorCount = m_pProjector->getProjectionGeometry()->getDetectorCount();
+	int iAngleCount = m_pProjector->getProjectionGeometry().getProjectionAngleCount();
+	int iDetectorCount = m_pProjector->getProjectionGeometry().getDetectorCount();
 
 
 	int zpDetector = calcNextPowerOfTwo(2 * m_pSinogram->getDetectorCount());
@@ -317,11 +230,11 @@ void CFilteredBackProjectionAlgorithm::performFiltering(CFloat32ProjectionData2D
 		case FILTER_PROJECTION:
 			// Fourier space, real, half the coefficients (because symmetric)
 			// 1 x iHalfFFTSize
-			pfFilter = m_filterConfig.m_pfCustomFilter;
+			pfFilter = &m_filterConfig.m_pfCustomFilter[0];
 			break;
 		case FILTER_SINOGRAM:
 			bFilterMultiAngle = true;
-			pfFilter = m_filterConfig.m_pfCustomFilter;
+			pfFilter = &m_filterConfig.m_pfCustomFilter[0];
 			break;
 		case FILTER_RSINOGRAM:
 			bFilterMultiAngle = true;
@@ -346,7 +259,7 @@ void CFilteredBackProjectionAlgorithm::performFiltering(CFloat32ProjectionData2D
 
 			for (int i = 0; i < count; ++i) {
 				float *rOut = pfFilter + i * 2 * zpDetector;
-				float *rIn = m_filterConfig.m_pfCustomFilter + i * m_filterConfig.m_iCustomFilterWidth;
+				float *rIn = &m_filterConfig.m_pfCustomFilter[i * m_filterConfig.m_iCustomFilterWidth];
 				memset(rOut, 0, sizeof(float) * 2 * zpDetector);
 
 				for(int j = iStartFilterIndex; j < iMaxFilterIndex; j++) {

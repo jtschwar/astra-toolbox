@@ -30,14 +30,13 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include "astra/AstraObjectManager.h"
 #include "astra/DataProjectorPolicies.h"
 
+#include "astra/Logging.h"
+
 using namespace std;
 
 namespace astra {
 
 #include "astra/Projector2DImpl.inl"
-
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CForwardProjectionAlgorithm::type = "FP";
 
 //----------------------------------------------------------------------------------------
 // Constructor - Default
@@ -102,8 +101,8 @@ bool CForwardProjectionAlgorithm::_check()
 	ASTRA_CONFIG_CHECK(m_pVolume->isInitialized(), "ForwardProjection", "Volume Data Object Not Initialized.");
 
 	// check compatibility between projector and data classes
-	ASTRA_CONFIG_CHECK(m_pSinogram->getGeometry()->isEqual(m_pProjector->getProjectionGeometry()), "ForwardProjection", "Projection Data not compatible with the specified Projector.");
-	ASTRA_CONFIG_CHECK(m_pVolume->getGeometry()->isEqual(m_pProjector->getVolumeGeometry()), "ForwardProjection", "Volume Data not compatible with the specified Projector.");
+	ASTRA_CONFIG_CHECK(m_pSinogram->getGeometry().isEqual(m_pProjector->getProjectionGeometry()), "ForwardProjection", "Projection Data not compatible with the specified Projector.");
+	ASTRA_CONFIG_CHECK(m_pVolume->getGeometry().isEqual(m_pProjector->getVolumeGeometry()), "ForwardProjection", "Volume Data not compatible with the specified Projector.");
 
 	ASTRA_CONFIG_CHECK(m_pForwardProjector, "ForwardProjection", "Invalid FP Policy");
 
@@ -115,45 +114,40 @@ bool CForwardProjectionAlgorithm::_check()
 // Initialize, use a Config object
 bool CForwardProjectionAlgorithm::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
+	ConfigReader<CAlgorithm> CR("ForwardProjectionAlgorithm", this, _cfg);
 
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
 		clear();
 	}
 
-	// projector
-	XMLNode node = _cfg.self.getSingleNode("ProjectorId");
-	ASTRA_CONFIG_CHECK(node, "ForwardProjection", "No ProjectorId tag specified.");
-	int id;
-	id = StringUtil::stringToInt(node.getContent(), -1);
-	m_pProjector = CProjector2DManager::getSingleton().get(id);
+	bool ok = true;
+	int id = -1;
 
-	// sinogram data
-	node = _cfg.self.getSingleNode("ProjectionDataId");
-	ASTRA_CONFIG_CHECK(node, "ForwardProjection", "No ProjectionDataId tag specified.");
-	id = StringUtil::stringToInt(node.getContent(), -1);
+	ok &= CR.getRequiredID("ProjectorId", id);
+	m_pProjector = CProjector2DManager::getSingleton().get(id);
+	if (!m_pProjector) {
+		ASTRA_ERROR("ProjectorId is not a valid id");
+		return false;
+	}
+
+	ok &= CR.getRequiredID("ProjectionDataId", id);
 	m_pSinogram = dynamic_cast<CFloat32ProjectionData2D*>(CData2DManager::getSingleton().get(id));
 
-	// volume data
-	node = _cfg.self.getSingleNode("VolumeDataId");
-	ASTRA_CONFIG_CHECK(node, "ForwardProjection", "No VolumeDataId tag specified.");
-	id = StringUtil::stringToInt(node.getContent(), -1);
+	ok &= CR.getRequiredID("VolumeDataId", id);
 	m_pVolume = dynamic_cast<CFloat32VolumeData2D*>(CData2DManager::getSingleton().get(id));
+
 	
-	// volume mask
-	if (_cfg.self.hasOption("VolumeMaskId")) {
+	if (CR.getOptionID("VolumeMaskId", id)) {
 		m_bUseVolumeMask = true;
-		id = StringUtil::stringToInt(_cfg.self.getOption("VolumeMaskId"), -1);
 		m_pVolumeMask = dynamic_cast<CFloat32VolumeData2D*>(CData2DManager::getSingleton().get(id));
 	}
 
-	// sino mask
-	if (_cfg.self.hasOption("SinogramMaskId")) {
+	if (CR.getOptionID("SinogramMaskId", id)) {
 		m_bUseSinogramMask = true;
-		id = StringUtil::stringToInt(_cfg.self.getOption("SinogramMaskId"), -1);
 		m_pSinogramMask = dynamic_cast<CFloat32ProjectionData2D*>(CData2DManager::getSingleton().get(id));
 	}
+
 
 	// ray or voxel-driven projector?
 	//m_bUseVoxelProjector = _cfg.self->getOptionBool("VoxelDriven", false);
@@ -165,37 +159,6 @@ bool CForwardProjectionAlgorithm::initialize(const Config& _cfg)
 	m_bIsInitialized = _check();
 	return m_bIsInitialized;
 }
-
-//---------------------------------------------------------------------------------------
-// Get Information - all
-map<string,boost::any> CForwardProjectionAlgorithm::getInformation() 
-{
-	map<string, boost::any> result;
-	result["ProjectorId"] = getInformation("ProjectorId");
-	result["ProjectionDataId"] = getInformation("ProjectionDataId");
-	result["VolumeDataId"] = getInformation("VolumeDataId");
-	return mergeMap<string,boost::any>(CAlgorithm::getInformation(), result);
-};
-
-//---------------------------------------------------------------------------------------
-// Get Information - specific
-boost::any CForwardProjectionAlgorithm::getInformation(std::string _sIdentifier) 
-{
-	if (_sIdentifier == "ProjectorId") {
-		int iIndex = CProjector2DManager::getSingleton().getIndex(m_pProjector);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	} else if (_sIdentifier == "ProjectionDataId") {
-		int iIndex = CData2DManager::getSingleton().getIndex(m_pSinogram);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	} else if (_sIdentifier == "VolumeDataId") {
-		int iIndex = CData2DManager::getSingleton().getIndex(m_pVolume);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	}
-	return CAlgorithm::getInformation(_sIdentifier);
-};
 
 //----------------------------------------------------------------------------------------
 // Initialize
@@ -256,7 +219,7 @@ void CForwardProjectionAlgorithm::setSinogramMask(CFloat32ProjectionData2D* _pMa
 
 //----------------------------------------------------------------------------------------
 // Iterate
-void CForwardProjectionAlgorithm::run(int _iNrIterations)
+bool CForwardProjectionAlgorithm::run(int _iNrIterations)
 {
 	// check initialized
 	ASTRA_ASSERT(m_bIsInitialized);
@@ -268,7 +231,7 @@ void CForwardProjectionAlgorithm::run(int _iNrIterations)
 //	} else {
 		m_pForwardProjector->project();
 //	}
-
+	return true;
 }
 //----------------------------------------------------------------------------------------
 

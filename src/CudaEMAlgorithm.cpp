@@ -31,12 +31,11 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/cuda/2d/em.h"
 
+#include "astra/Logging.h"
+
 using namespace std;
 
 namespace astra {
-
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CCudaEMAlgorithm::type = "EM_CUDA";
 
 //----------------------------------------------------------------------------------------
 // Constructor
@@ -57,8 +56,14 @@ CCudaEMAlgorithm::~CCudaEMAlgorithm()
 // Initialize - Config
 bool CCudaEMAlgorithm::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("CudaEMAlgorithm", this, _cfg);
+	ConfigReader<CAlgorithm> CR("CudaEMAlgorithm", this, _cfg);
+
+	if (CR.hasOption("SinogramMaskId")) {
+		ASTRA_CONFIG_CHECK(false, "EM_CUDA", "Sinogram mask option is not supported.");
+	}
+	if (CR.hasOption("ReconstructionMaskId")) {
+		ASTRA_CONFIG_CHECK(false, "EM_CUDA", "Reconstruction mask option is not supported.");
+	}
 
 	m_bIsInitialized = CCudaReconstructionAlgorithm2D::initialize(_cfg);
 

@@ -24,20 +24,19 @@
 # -----------------------------------------------------------------------
 #
 # distutils: language = c++
-# distutils: libraries = astra
 
-import six
+from __future__ import print_function
 
 cimport cython
 from cython cimport view
 
-cimport PyData2DManager
+from . cimport PyData2DManager
 from .PyData2DManager cimport CData2DManager
 
-cimport PyProjector2DManager
+from . cimport PyProjector2DManager
 from .PyProjector2DManager cimport CProjector2DManager
 
-cimport PyXMLDocument
+from . cimport PyXMLDocument
 from .PyXMLDocument cimport XMLDocument
 
 import numpy as np
@@ -47,22 +46,24 @@ np.import_array()
 
 
 from .PyIncludes cimport *
-cimport utils
+from . cimport utils
 from .utils import wrap_from_bytes
+from .log import AstraError
 
 from .pythonutils import geom_size
 
 import operator
 
-from six.moves import reduce
-
 cdef CData2DManager * man2d = <CData2DManager * >PyData2DManager.getSingletonPtr()
 cdef CProjector2DManager * manProj = <CProjector2DManager * >PyProjector2DManager.getSingletonPtr()
 
 
-cdef extern from "CFloat32CustomPython.h":
+cdef extern from "src/CFloat32CustomPython.h":
     cdef cppclass CFloat32CustomPython:
-        CFloat32CustomPython(arrIn)
+        CFloat32CustomPython(np.ndarray arrIn)
+
+cdef extern from "astra/SheppLogan.h" namespace "astra":
+    cdef void generateSheppLogan(CFloat32VolumeData2D*, bool)
 
 def clear():
     man2d.clear()
@@ -77,61 +78,53 @@ def delete(ids):
 
 
 def create(datatype, geometry, data=None, link=False):
-    cdef Config *cfg
+    cdef XMLConfig *cfg
     cdef CVolumeGeometry2D * pGeometry
-    cdef CProjectionGeometry2D * ppGeometry
+    cdef unique_ptr[CProjectionGeometry2D] ppGeometry
     cdef CFloat32Data2D * pDataObject2D
     cdef CFloat32CustomMemory * pCustom
 
     if link:
         geom_shape = geom_size(geometry)
         if data.shape != geom_shape:
-            raise ValueError("The dimensions of the data do not match those specified in the geometry: {} != {}".format(data.shape, geom_shape))
+            raise ValueError("The dimensions of the data {} do not match those "
+                             "specified in the geometry {}".format(data.shape, geom_shape))
 
     if datatype == '-vol':
-        cfg = utils.dictToConfig(six.b('VolumeGeometry'), geometry)
+        cfg = utils.dictToConfig(b'VolumeGeometry', geometry)
         pGeometry = new CVolumeGeometry2D()
         if not pGeometry.initialize(cfg[0]):
             del cfg
             del pGeometry
-            raise RuntimeError('Geometry class not initialized.')
+            raise AstraError('Geometry class could not be initialized', append_log=True)
         if link:
             pCustom = <CFloat32CustomMemory*> new CFloat32CustomPython(data)
-            pDataObject2D = <CFloat32Data2D * > new CFloat32VolumeData2D(pGeometry, pCustom)
+            pDataObject2D = <CFloat32Data2D * > new CFloat32VolumeData2D(cython.operator.dereference(pGeometry), pCustom)
         else:
-            pDataObject2D = <CFloat32Data2D * > new CFloat32VolumeData2D(pGeometry)
+            pDataObject2D = <CFloat32Data2D * > new CFloat32VolumeData2D(cython.operator.dereference(pGeometry))
         del cfg
         del pGeometry
     elif datatype == '-sino':
-        cfg = utils.dictToConfig(six.b('ProjectionGeometry'), geometry)
-        tpe = wrap_from_bytes(cfg.self.getAttribute(six.b('type')))
-        if (tpe == 'sparse_matrix'):
-            ppGeometry = <CProjectionGeometry2D * >new CSparseMatrixProjectionGeometry2D()
-        elif (tpe == 'fanflat'):
-            ppGeometry = <CProjectionGeometry2D * >new CFanFlatProjectionGeometry2D()
-        elif (tpe == 'fanflat_vec'):
-            ppGeometry = <CProjectionGeometry2D * >new CFanFlatVecProjectionGeometry2D()
-        elif (tpe == 'parallel_vec'):
-            ppGeometry = <CProjectionGeometry2D * >new CParallelVecProjectionGeometry2D()
-        else:
-            ppGeometry = <CProjectionGeometry2D * >new CParallelProjectionGeometry2D()
-        if not ppGeometry.initialize(cfg[0]):
+        cfg = utils.dictToConfig(b'ProjectionGeometry', geometry)
+        tpe = cfg.self.getAttribute(b'type')
+        ppGeometry = constructProjectionGeometry2D(tpe)
+        if not ppGeometry:
+            raise ValueError("'{}' is not a valid 2D geometry type".format(tpe))
+        if not ppGeometry.get().initialize(cfg[0]):
             del cfg
-            del ppGeometry
-            raise RuntimeError('Geometry class not initialized.')
+            raise AstraError('Geometry class could not be initialized', append_log=True)
         if link:
             pCustom = <CFloat32CustomMemory*> new CFloat32CustomPython(data)
-            pDataObject2D = <CFloat32Data2D * > new CFloat32ProjectionData2D(ppGeometry, pCustom)
+            pDataObject2D = <CFloat32Data2D * > new CFloat32ProjectionData2D(cython.operator.dereference(ppGeometry), pCustom)
         else:
-            pDataObject2D = <CFloat32Data2D * > new CFloat32ProjectionData2D(ppGeometry)
-        del ppGeometry
+            pDataObject2D = <CFloat32Data2D * > new CFloat32ProjectionData2D(cython.operator.dereference(ppGeometry))
         del cfg
     else:
-        raise ValueError("Invalid datatype.  Please specify '-vol' or '-sino'.")
+        raise ValueError("Invalid datatype. Please specify '-vol' or '-sino'")
 
     if not pDataObject2D.isInitialized():
         del pDataObject2D
-        raise RuntimeError("Couldn't initialize data object.")
+        raise AstraError("Couldn't initialize data object", append_log=True)
 
     if not link: fillDataObject(pDataObject2D, data)
 
@@ -145,13 +138,14 @@ cdef fillDataObject(CFloat32Data2D * obj, data):
             obj_shape = (obj.getHeight(), obj.getWidth())
             if data.shape != obj_shape:
                 raise ValueError(
-                  "The dimensions of the data do not match those specified in the geometry: {} != {}".format(data.shape, obj_shape))
+                  "The dimensions of the data {} do not match those specified "
+                  "in the geometry {}".format(data.shape, obj_shape))
             fillDataObjectArray(obj, np.ascontiguousarray(data,dtype=np.float32))
         else:
             fillDataObjectScalar(obj, np.float32(data))
 
 cdef fillDataObjectScalar(CFloat32Data2D * obj, float s):
-    cdef int i
+    cdef size_t i
     for i in range(obj.getSize()):
         obj.getData()[i] = s
 
@@ -164,9 +158,9 @@ cdef fillDataObjectArray(CFloat32Data2D * obj, float [:,::1] data):
 cdef CFloat32Data2D * getObject(i) except NULL:
     cdef CFloat32Data2D * pDataObject = man2d.get(i)
     if pDataObject == NULL:
-        raise ValueError("Data object not found")
+        raise AstraError("Data object not found")
     if not pDataObject.isInitialized():
-        raise RuntimeError("Data object not initialized properly.")
+        raise AstraError("Data object not initialized properly")
     return pDataObject
 
 
@@ -185,15 +179,15 @@ def get_geometry(i):
         pDataObject3 = <CFloat32VolumeData2D * >pDataObject
         geom = utils.configToDict(pDataObject3.getGeometry().getConfiguration())
     else:
-        raise RuntimeError("Not a known data object")
+        raise AstraError("Not a known data object")
     return geom
 
 cdef CProjector2D * getProjector(i) except NULL:
     cdef CProjector2D * proj = manProj.get(i)
     if proj == NULL:
-        raise RuntimeError("Projector not initialized.")
+        raise AstraError("Projector not found")
     if not proj.isInitialized():
-        raise RuntimeError("Projector not initialized.")
+        raise AstraError("Projector not initialized")
     return proj
 
 def check_compatible(i, proj_id):
@@ -208,63 +202,53 @@ def check_compatible(i, proj_id):
         pDataObject3 = <CFloat32VolumeData2D * >pDataObject
         return pDataObject3.getGeometry().isEqual(proj.getVolumeGeometry())
     else:
-        raise RuntimeError("Not a known data object")
+        raise AstraError("Not a known data object type")
 
 def change_geometry(i, geom):
-    cdef Config *cfg
+    cdef XMLConfig *cfg
     cdef CVolumeGeometry2D * pGeometry
-    cdef CProjectionGeometry2D * ppGeometry
+    cdef unique_ptr[CProjectionGeometry2D] ppGeometry
     cdef CFloat32Data2D * pDataObject = getObject(i)
     cdef CFloat32ProjectionData2D * pDataObject2
     cdef CFloat32VolumeData2D * pDataObject3
     if pDataObject.getType() == TWOPROJECTION:
         pDataObject2 = <CFloat32ProjectionData2D * >pDataObject
-        cfg = utils.dictToConfig(six.b('ProjectionGeometry'), geom)
-        tpe = wrap_from_bytes(cfg.self.getAttribute(six.b('type')))
-        if (tpe == 'sparse_matrix'):
-            ppGeometry = <CProjectionGeometry2D * >new CSparseMatrixProjectionGeometry2D()
-        elif (tpe == 'fanflat'):
-            ppGeometry = <CProjectionGeometry2D * >new CFanFlatProjectionGeometry2D()
-        elif (tpe == 'fanflat_vec'):
-            ppGeometry = <CProjectionGeometry2D * >new CFanFlatVecProjectionGeometry2D()
-        elif (tpe == 'parallel_vec'):
-            ppGeometry = <CProjectionGeometry2D * >new CParallelVecProjectionGeometry2D()
-        else:
-            ppGeometry = <CProjectionGeometry2D * >new CParallelProjectionGeometry2D()
-        if not ppGeometry.initialize(cfg[0]):
+        cfg = utils.dictToConfig(b'ProjectionGeometry', geom)
+        tpe = cfg.self.getAttribute(b'type')
+        ppGeometry = constructProjectionGeometry2D(tpe)
+        if not ppGeometry:
+            raise ValueError("'{}' is not a valid 2D geometry type".format(tpe))
+        if not ppGeometry.get().initialize(cfg[0]):
             del cfg
-            del ppGeometry
-            raise RuntimeError('Geometry class not initialized.')
-        geom_shape = (ppGeometry.getProjectionAngleCount(), ppGeometry.getDetectorCount())
+            AstraError('Geometry class could not be initialized', append_log=True)
+        geom_shape = (ppGeometry.get().getProjectionAngleCount(), ppGeometry.get().getDetectorCount())
         obj_shape = (pDataObject2.getAngleCount(), pDataObject2.getDetectorCount())
         if geom_shape != obj_shape:
-            del ppGeometry
             del cfg
-            raise ValueError(
-                "The dimensions of the data do not match those specified in the geometry: {} != {}", obj_shape, geom_shape)
-        pDataObject2.changeGeometry(ppGeometry)
-        del ppGeometry
+            raise ValueError("The dimensions of the data {} do not match those "
+                             "specified in the geometry {}".format(obj_shape, geom_shape))
+        pDataObject2.changeGeometry(cython.operator.dereference(ppGeometry))
         del cfg
     elif pDataObject.getType() == TWOVOLUME:
         pDataObject3 = <CFloat32VolumeData2D * >pDataObject
-        cfg = utils.dictToConfig(six.b('VolumeGeometry'), geom)
+        cfg = utils.dictToConfig(b'VolumeGeometry', geom)
         pGeometry = new CVolumeGeometry2D()
         if not pGeometry.initialize(cfg[0]):
             del cfg
             del pGeometry
-            raise RuntimeError('Geometry class not initialized.')
+            raise AstraError('Geometry class could not be initialized', append_log=True)
         geom_shape = (pGeometry.getGridRowCount(), pGeometry.getGridColCount())
         obj_shape = (pDataObject3.getHeight(), pDataObject3.getWidth())
         if geom_shape != obj_shape:
             del cfg
             del pGeometry
-            raise ValueError(
-                "The dimensions of the data do not match those specified in the geometry: {} != {}", obj_shape, geom_shape)
-        pDataObject3.changeGeometry(pGeometry)
+            raise ValueError("The dimensions of the data {} do not match those "
+                             "specified in the geometry {}".format(obj_shape, geom_shape))
+        pDataObject3.changeGeometry(cython.operator.dereference(pGeometry))
         del cfg
         del pGeometry
     else:
-        raise RuntimeError("Not a known data object")
+        raise AstraError("Not a known data object")
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
@@ -287,6 +271,10 @@ def get_shared(i):
 def get_single(i):
     raise NotImplementedError("Not yet implemented")
 
+def shepp_logan(i, modified=True):
+    cdef CFloat32Data2D * pDataObject = getObject(i)
+    cdef CFloat32VolumeData2D * pVolumeDataObject = <CFloat32VolumeData2D *>getObject(i)
+    generateSheppLogan(pVolumeDataObject, modified);
 
 def info():
-    six.print_(wrap_from_bytes(man2d.info()))
+    print(wrap_from_bytes(man2d.info()))

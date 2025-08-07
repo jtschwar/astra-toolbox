@@ -24,41 +24,47 @@
 # -----------------------------------------------------------------------
 #
 # distutils: language = c++
-# distutils: libraries = astra
 
 include "config.pxi"
 
+from . cimport utils
+from .utils import wrap_from_bytes
+from .utils cimport createProjectionGeometry3D
+from .log import AstraError
+
 IF HAVE_CUDA==True:
 
-    import six
     from .PyIncludes cimport *
     from libcpp.vector cimport vector
 
-    cdef extern from "astra/CompositeGeometryManager.h" namespace "astra::CCompositeGeometryManager::SJob":
-        cdef enum EMode:
-            MODE_ADD = 0
-            MODE_SET = 1
+    cdef extern from "astra/Filters.h" namespace "astra":
+        cdef enum E_FBPFILTER:
+            FILTER_ERROR
+            FILTER_NONE
+            FILTER_RAMLAK
+        cdef cppclass SFilterConfig:
+            SFilterConfig()
+            E_FBPFILTER m_eType
+
+    cdef extern from "astra/CompositeGeometryManager.h" namespace "astra::CCompositeGeometryManager":
+        cdef enum EJobMode:
+            MODE_ADD
+            MODE_SET
     cdef extern from "astra/CompositeGeometryManager.h" namespace "astra":
         cdef cppclass CCompositeGeometryManager:
-            bool doFP(CProjector3D *, vector[CFloat32VolumeData3D *], vector[CFloat32ProjectionData3D *], EMode)
-            bool doBP(CProjector3D *, vector[CFloat32VolumeData3D *], vector[CFloat32ProjectionData3D *], EMode)
-            bool doFDK(CProjector3D *, CFloat32VolumeData3D *, CFloat32ProjectionData3D *, bool, const float*, EMode)
+            bool doFP(CProjector3D *, vector[CFloat32VolumeData3D *], vector[CFloat32ProjectionData3D *], EJobMode) nogil
+            bool doBP(CProjector3D *, vector[CFloat32VolumeData3D *], vector[CFloat32ProjectionData3D *], EJobMode) nogil
+            bool doFDK(CProjector3D *, CFloat32VolumeData3D *, CFloat32ProjectionData3D *, bool, SFilterConfig &, EJobMode) nogil
 
     cdef extern from *:
-        CFloat32VolumeData3D * dynamic_cast_vol_mem "dynamic_cast<astra::CFloat32VolumeData3D*>" (CFloat32Data3D * )
-        CFloat32ProjectionData3D * dynamic_cast_proj_mem "dynamic_cast<astra::CFloat32ProjectionData3D*>" (CFloat32Data3D * )
-
-    cdef extern from "astra/Float32ProjectionData3D.h" namespace "astra":
-        cdef cppclass CFloat32ProjectionData3D:
-            bool isInitialized()
-    cdef extern from "astra/Float32VolumeData3D.h" namespace "astra":
-        cdef cppclass CFloat32VolumeData3D:
-            bool isInitialized()
+        CFloat32VolumeData3D * dynamic_cast_vol_mem "dynamic_cast<astra::CFloat32VolumeData3D*>" (CData3D * )
+        CFloat32ProjectionData3D * dynamic_cast_proj_mem "dynamic_cast<astra::CFloat32ProjectionData3D*>" (CData3D * )
 
 
-    cimport PyProjector3DManager
+
+    from . cimport PyProjector3DManager
     from .PyProjector3DManager cimport CProjector3DManager
-    cimport PyData3DManager
+    from . cimport PyData3DManager
     from .PyData3DManager cimport CData3DManager
 
     cdef CProjector3DManager * manProj = <CProjector3DManager * >PyProjector3DManager.getSingletonPtr()
@@ -66,35 +72,41 @@ IF HAVE_CUDA==True:
 
     def do_composite(projector_id, vol_ids, proj_ids, mode, t):
         if mode != MODE_ADD and mode != MODE_SET:
-            raise RuntimeError("internal error: wrong composite mode")
+            raise AstraError("Internal error: wrong composite mode")
+        cdef EJobMode eMode = mode;
         cdef vector[CFloat32VolumeData3D *] vol
         cdef CFloat32VolumeData3D * pVolObject
         cdef CFloat32ProjectionData3D * pProjObject
         for v in vol_ids:
             pVolObject = dynamic_cast_vol_mem(man3d.get(v))
             if pVolObject == NULL:
-                raise Exception("Data object not found")
+                raise AstraError("Data object not found")
             if not pVolObject.isInitialized():
-                raise Exception("Data object not initialized properly")
+                raise AstraError("Data object not initialized properly")
             vol.push_back(pVolObject)
         cdef vector[CFloat32ProjectionData3D *] proj
         for v in proj_ids:
             pProjObject = dynamic_cast_proj_mem(man3d.get(v))
             if pProjObject == NULL:
-                raise Exception("Data object not found")
+                raise AstraError("Data object not found")
             if not pProjObject.isInitialized():
-                raise Exception("Data object not initialized properly")
+                raise AstraError("Data object not initialized properly")
             proj.push_back(pProjObject)
         cdef CCompositeGeometryManager m
         cdef CProjector3D * projector = manProj.get(projector_id) # may be NULL
+        cdef bool ret = True
         if t == "FP":
-            if not m.doFP(projector, vol, proj, mode):
-                raise Exception("Failed to perform FP")
+            with nogil:
+                ret = m.doFP(projector, vol, proj, eMode)
+            if not ret:
+                raise AstraError("Failed to perform FP", append_log=True)
         elif t == "BP":
-            if not m.doBP(projector, vol, proj, mode):
-                raise Exception("Failed to perform BP")
+            with nogil:
+                ret = m.doBP(projector, vol, proj, eMode)
+            if not ret:
+                raise AstraError("Failed to perform BP", append_log=True)
         else:
-            raise RuntimeError("internal error: wrong composite op type")
+            raise AstraError("Internal error: wrong composite op type")
 
     def do_composite_FP(projector_id, vol_ids, proj_ids):
         do_composite(projector_id, vol_ids, proj_ids, MODE_SET, "FP")
@@ -111,46 +123,55 @@ IF HAVE_CUDA==True:
         cdef CFloat32ProjectionData3D * pProjObject
         pVolObject = dynamic_cast_vol_mem(man3d.get(vol_id))
         if pVolObject == NULL:
-            raise Exception("Data object not found")
+            raise AstraError("Data object not found")
         if not pVolObject.isInitialized():
-            raise Exception("Data object not initialized properly")
+            raise AstraError("Data object not initialized properly")
         pProjObject = dynamic_cast_proj_mem(man3d.get(proj_id))
         if pProjObject == NULL:
-            raise Exception("Data object not found")
+            raise AstraError("Data object not found")
         if not pProjObject.isInitialized():
-            raise Exception("Data object not initialized properly")
+            raise AstraError("Data object not initialized properly")
         cdef CCompositeGeometryManager m
         cdef CProjector3D * projector = manProj.get(projector_id) # may be NULL
-        if not m.doFDK(projector, pVolObject, pProjObject, False, NULL, MODE_ADD):
-            raise Exception("Failed to perform FDK")
+        cdef SFilterConfig filterConfig
+        filterConfig.m_eType = FILTER_RAMLAK
+        cdef bool ret = True
+        with nogil:
+            ret = m.doFDK(projector, pVolObject, pProjObject, False, filterConfig, MODE_ADD)
+        if not ret:
+            raise AstraError("Failed to perform FDK", append_log=True)
 
-    cimport utils
+    from . cimport utils
     from .utils cimport linkVolFromGeometry, linkProjFromGeometry
 
     def direct_FPBP3D(projector_id, vol, proj, mode, t):
         if mode != MODE_ADD and mode != MODE_SET:
-            raise RuntimeError("internal error: wrong composite mode")
+            raise AstraError("Internal error: wrong composite mode")
+        cdef EJobMode eMode = mode
         cdef CProjector3D * projector = manProj.get(projector_id)
         if projector == NULL:
-            raise Exception("Projector not found")
-        cdef CVolumeGeometry3D *pGeometry = projector.getVolumeGeometry()
-        cdef CProjectionGeometry3D *ppGeometry = projector.getProjectionGeometry()
-        cdef CFloat32VolumeData3D * pVol = linkVolFromGeometry(pGeometry, vol)
-        cdef CFloat32ProjectionData3D * pProj = linkProjFromGeometry(ppGeometry, proj)
+            raise AstraError("Projector not found")
+        cdef CFloat32VolumeData3D * pVol = linkVolFromGeometry(projector.getVolumeGeometry(), vol)
+        cdef CFloat32ProjectionData3D * pProj = linkProjFromGeometry(projector.getProjectionGeometry(), proj)
         cdef vector[CFloat32VolumeData3D *] vols
         cdef vector[CFloat32ProjectionData3D *] projs
         vols.push_back(pVol)
         projs.push_back(pProj)
         cdef CCompositeGeometryManager m
+        cdef bool ret = True
         try:
             if t == "FP":
-                if not m.doFP(projector, vols, projs, mode):
-                    raise Exception("Failed to perform FP")
+                with nogil:
+                    ret = m.doFP(projector, vols, projs, eMode)
+                if not ret:
+                    AstraError("Failed to perform FP", append_log=True)
             elif t == "BP":
-                if not m.doBP(projector, vols, projs, mode):
-                    raise Exception("Failed to perform BP")
+                with nogil:
+                    ret = m.doBP(projector, vols, projs, eMode)
+                if not ret:
+                    AstraError("Failed to perform BP", append_log=True)
             else:
-                raise RuntimeError("internal error: wrong op type")
+                AstraError("Internal error: wrong op type")
         finally:
             del pVol
             del pProj
@@ -178,3 +199,19 @@ IF HAVE_CUDA==True:
         :type datatype: :class:`numpy.ndarray` or :class:`astra.data3d.GPULink`
         """
         direct_FPBP3D(projector_id, vol, proj, MODE_SET, "BP")
+
+    def getProjectedBBox(geometry, minx, maxx, miny, maxy, minz, maxz):
+        cdef unique_ptr[CProjectionGeometry3D] ppGeometry
+        cdef double minu=0., maxu=0., minv=0., maxv=0.
+        ppGeometry = createProjectionGeometry3D(geometry)
+        ppGeometry.get().getProjectedBBox(minx, maxx, miny, maxy, minz, maxz, minu, maxu, minv, maxv)
+        return (minv, maxv)
+
+    def projectPoint(geometry, x, y, z, angle):
+        cdef unique_ptr[CProjectionGeometry3D] ppGeometry
+        cdef double u=0., v=0.
+        ppGeometry = createProjectionGeometry3D(geometry)
+        ppGeometry.get().projectPoint(x, y, z, angle, u, v)
+        return (u, v)
+
+

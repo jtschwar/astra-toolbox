@@ -31,13 +31,12 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/DataProjectorPolicies.h"
 
+#include "astra/Logging.h"
+
 using namespace std;
 using namespace astra;
 
 #include "astra/SparseMatrixProjector2D.inl"
-
-// type of the projector, needed to register with CProjectorFactory
-std::string CSparseMatrixProjector2D::type = "sparse_matrix";
 
 //----------------------------------------------------------------------------------------
 // default constructor
@@ -48,8 +47,8 @@ CSparseMatrixProjector2D::CSparseMatrixProjector2D()
 
 //----------------------------------------------------------------------------------------
 // constructor
-CSparseMatrixProjector2D::CSparseMatrixProjector2D(CSparseMatrixProjectionGeometry2D* _pProjectionGeometry,
-                                                   CVolumeGeometry2D* _pReconstructionGeometry)
+CSparseMatrixProjector2D::CSparseMatrixProjector2D(const CSparseMatrixProjectionGeometry2D &_pProjectionGeometry,
+                                                   const CVolumeGeometry2D &_pReconstructionGeometry)
 
 {
 	_clear();
@@ -105,8 +104,6 @@ bool CSparseMatrixProjector2D::_check()
 // Initialize, use a Config object
 bool CSparseMatrixProjector2D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
 		clear();
@@ -124,8 +121,8 @@ bool CSparseMatrixProjector2D::initialize(const Config& _cfg)
 
 //---------------------------------------------------------------------------------------
 // Initialize
-bool CSparseMatrixProjector2D::initialize(CSparseMatrixProjectionGeometry2D* _pProjectionGeometry, 
-													 CVolumeGeometry2D* _pVolumeGeometry)
+bool CSparseMatrixProjector2D::initialize(const CSparseMatrixProjectionGeometry2D &_pProjectionGeometry,
+													 const CVolumeGeometry2D &_pVolumeGeometry)
 {
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -133,8 +130,8 @@ bool CSparseMatrixProjector2D::initialize(CSparseMatrixProjectionGeometry2D* _pP
 	}
 
 	// hardcopy geometries
-	m_pProjectionGeometry = _pProjectionGeometry->clone();
-	m_pVolumeGeometry = _pVolumeGeometry->clone();
+	m_pProjectionGeometry = _pProjectionGeometry.clone();
+	m_pVolumeGeometry = _pVolumeGeometry.clone();
 
 	// success
 	m_bIsInitialized = _check();

@@ -30,14 +30,13 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include "astra/AstraObjectManager.h"
 #include "astra/DataProjectorPolicies.h"
 
+#include "astra/Logging.h"
+
 using namespace std;
 
 namespace astra {
 
 #include "astra/Projector2DImpl.inl"
-
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CBackProjectionAlgorithm::type = "BP";
 
 //----------------------------------------------------------------------------------------
 // Constructor
@@ -93,8 +92,7 @@ bool CBackProjectionAlgorithm::_check()
 // Initialize - Config
 bool CBackProjectionAlgorithm::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("BackProjectionAlgorithm", this, _cfg);
+	ConfigReader<CAlgorithm> CR("BackProjectionAlgorithm", this, _cfg);
 
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -145,24 +143,9 @@ void CBackProjectionAlgorithm::_init()
 
 }
 
-//---------------------------------------------------------------------------------------
-// Information - All
-map<string,boost::any> CBackProjectionAlgorithm::getInformation() 
-{
-	map<string, boost::any> res;
-	return mergeMap<string,boost::any>(CReconstructionAlgorithm2D::getInformation(), res);
-};
-
-//---------------------------------------------------------------------------------------
-// Information - Specific
-boost::any CBackProjectionAlgorithm::getInformation(std::string _sIdentifier) 
-{
-	return CAlgorithm::getInformation(_sIdentifier);
-};
-
 //----------------------------------------------------------------------------------------
 // Iterate
-void CBackProjectionAlgorithm::run(int _iNrIterations)
+bool CBackProjectionAlgorithm::run(int _iNrIterations)
 {
 	// check initialized
 	ASTRA_ASSERT(m_bIsInitialized);
@@ -181,6 +164,8 @@ void CBackProjectionAlgorithm::run(int _iNrIterations)
 	pBackProjector->project();
 
 	ASTRA_DELETE(pBackProjector);
+
+	return true;
 }
 //----------------------------------------------------------------------------------------
 

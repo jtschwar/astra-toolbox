@@ -25,6 +25,8 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 -----------------------------------------------------------------------
 */
 
+#include "astra/cuda/gpu_runtime_wrapper.h"
+
 #include "astra/cuda/2d/sart.h"
 #include "astra/cuda/2d/util.h"
 #include "astra/cuda/2d/arith.h"
@@ -47,14 +49,20 @@ __global__ void devMUL_SART(float* pfOut, const float* pfIn, unsigned int pitch,
 	pfOut[x] *= pfIn[x];
 }
 
-void MUL_SART(float* pfOut, const float* pfIn, unsigned int pitch, unsigned int width)
+bool MUL_SART(float* pfOut, const float* pfIn, unsigned int pitch, unsigned int width)
 {
 	dim3 blockSize(16,16);
 	dim3 gridSize((width+15)/16, 1);
 
-	devMUL_SART<<<gridSize, blockSize>>>(pfOut, pfIn, pitch, width);
+	cudaStream_t stream;
+	if (!checkCuda(cudaStreamCreate(&stream), "MUL_SART stream"))
+		return false;
 
-	checkCuda(cudaThreadSynchronize(), "MUL_SART");
+	devMUL_SART<<<gridSize, blockSize, 0, stream>>>(pfOut, pfIn, pitch, width);
+
+	bool ok = checkCuda(cudaStreamSynchronize(stream), "MUL_SART");
+	cudaStreamDestroy(stream);
+	return ok;
 }
 
 

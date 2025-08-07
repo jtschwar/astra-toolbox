@@ -111,13 +111,13 @@ public:
 
 	/** Create a hard copy. 
 	*/
-	virtual CProjectionGeometry2D* clone();
+	virtual CProjectionGeometry2D* clone() const override;
 
     /** Return true if this geometry instance is the same as the one specified.
 	 *
 	 * @return true if this geometry instance is the same as the one specified.
 	 */
-	virtual bool isEqual(CProjectionGeometry2D*) const;
+	virtual bool isEqual(const CProjectionGeometry2D&) const override;
 
 	/** Returns true if the type of geometry defined in this class is the one specified in _sType.
 	 *
@@ -131,17 +131,6 @@ public:
 	 * @return Configuration Object.
 	 */
 	virtual Config* getConfiguration() const;
-
-
-	/**
-	 * Returns a vector describing the direction of a ray belonging to a certain detector
-	 *
-	 * @param _iProjectionIndex index of projection
-	 * @param _iProjectionIndex index of detector
-	 *
-	 * @return a unit vector describing the direction
-	 */
-	 virtual CVector3D getProjectionDirection(int _iProjectionIndex, int _iDetectorIndex);
 
 protected:
 

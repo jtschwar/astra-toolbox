@@ -97,7 +97,7 @@ public:
 							  int _iDetectorColCount,
 							  float32 _fDetectorWidth,
 							  float32 _fDetectorHeight,
-							  const float32* _pfProjectionAngles,
+							  std::vector<float32> &&_pfProjectionAngles,
 							  float32 _fOriginSourceDistance,
 							  float32 _fOriginDetectorDistance);
 
@@ -132,7 +132,7 @@ public:
 					int _iDetectorColCount,
 					float32 _fDetectorWidth,
 					float32 _fDetectorHeight,
-					const float32* _pfProjectionAngles,
+					std::vector<float32> &&_pfProjectionAngles,
 					float32 _fOriginSourceDistance,
 					float32 _fOriginDetectorDistance);
 
@@ -179,11 +179,6 @@ public:
 	 * @return Distance from the source to the detector
 	 */
 	float32 getSourceDetectorDistance() const;
-
-	/**
-	 * Returns a vector giving the projection direction for a projection and detector index
-	 */
-	virtual CVector3D getProjectionDirection(int _iProjectionIndex, int _iDetectorIndex) const;
 
 	virtual void projectPoint(double fX, double fY, double fZ,
 	                          int iAngleIndex,

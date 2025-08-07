@@ -24,53 +24,52 @@
 # -----------------------------------------------------------------------
 #
 # distutils: language = c++
-# distutils: libraries = astra
 
 import sys
 cimport numpy as np
 import numpy as np
-import six
-if six.PY3:
-    import builtins
-else:
-    import __builtin__ as builtins
+import builtins
 from libcpp.string cimport string
 from libcpp.vector cimport vector
 from libcpp.list cimport list
+from libcpp.utility cimport move
 from cython.operator cimport dereference as deref, preincrement as inc
-from cpython.version cimport PY_MAJOR_VERSION
+from cpython.pycapsule cimport PyCapsule_IsValid
 
-cimport PyXMLDocument
+from . cimport PyXMLDocument
 from .PyXMLDocument cimport XMLDocument
 from .PyXMLDocument cimport XMLNode
 from .PyIncludes cimport *
 
 from .pythonutils import GPULink, checkArrayForLink
-
-cdef extern from "CFloat32CustomPython.h":
-    cdef cppclass CFloat32CustomPython:
-        CFloat32CustomPython(arrIn)
+from .log import AstraError
 
 cdef extern from "Python.h":
     void* PyLong_AsVoidPtr(object)
+
+cdef extern from *:
+    XMLConfig* dynamic_cast_XMLConfig "dynamic_cast<astra::XMLConfig*>" (Config*)
+
+cdef extern from "src/dlpack.h":
+    CFloat32VolumeData3D* getDLTensor(obj, const CVolumeGeometry3D &pGeom, string &error)
+    CFloat32ProjectionData3D* getDLTensor(obj, const CProjectionGeometry3D &pGeom, string &error)
+
 
 
 include "config.pxi"
 
 
-cdef Config * dictToConfig(string rootname, dc) except NULL:
-    cdef Config * cfg = new Config()
-    cfg.initialize(rootname)
+cdef XMLConfig * dictToConfig(string rootname, dc) except NULL:
+    cdef XMLConfig * cfg = new XMLConfig(rootname)
     try:
         readDict(cfg.self, dc)
-    except Exception:
+    except:
         del cfg
-        exc = sys.exc_info()
-        raise exc[0], exc[1], exc[2]
+        raise
     return cfg
 
 def convert_item(item):
-    if isinstance(item, six.string_types):
+    if isinstance(item, str):
         return item.encode('ascii')
 
     if type(item) is not dict:
@@ -83,19 +82,13 @@ def convert_item(item):
 
 
 def wrap_to_bytes(value):
-    if isinstance(value, six.binary_type):
+    if isinstance(value, bytes):
         return value
-    s = str(value)
-    if PY_MAJOR_VERSION == 3:
-        s = s.encode('ascii')
-    return s
+    return str(value).encode('ascii')
 
 
 def wrap_from_bytes(value):
-    s = value
-    if PY_MAJOR_VERSION == 3:
-        s = s.decode('ascii')
-    return s
+    return value.decode('ascii')
 
 
 cdef bool readDict(XMLNode root, _dc) except False:
@@ -121,16 +114,16 @@ cdef bool readDict(XMLNode root, _dc) except False:
             elif val.ndim == 1:
                 listbase.setContent(data, val.shape[0])
             else:
-                raise Exception("Only 1 or 2 dimensions are allowed")
+                raise AstraError("Only 1 or 2 dimensions are allowed")
         elif isinstance(val, dict):
-            if item == six.b('option') or item == six.b('options') or item == six.b('Option') or item == six.b('Options'):
+            if item == b'option' or item == b'options' or item == b'Option' or item == b'Options':
                 readOptions(root, val)
             else:
                 itm = root.addChildNode(item)
                 readDict(itm, val)
         else:
-            if item == six.b('type'):
-                root.addAttribute(< string > six.b('type'), <string> wrap_to_bytes(val))
+            if item == b'type':
+                root.addAttribute(< string > b'type', <string> wrap_to_bytes(val))
             else:
                 if isinstance(val, builtins.bool):
                     val = int(val)
@@ -146,14 +139,14 @@ cdef bool readOptions(XMLNode node, dc) except False:
     for item in dc:
         val = dc[item]
         if node.hasOption(item):
-            raise Exception('Duplicate Option: %s' % item)
+            raise AstraError('Duplicate Option: %s' % item)
         if isinstance(val, builtins.list) or isinstance(val, tuple):
             val = np.array(val,dtype=np.float64)
         if isinstance(val, np.ndarray):
             if val.size == 0:
                 break
-            listbase = node.addChildNode(six.b('Option'))
-            listbase.addAttribute(< string > six.b('key'), < string > item)
+            listbase = node.addChildNode(b'Option')
+            listbase.addAttribute(< string > b'key', < string > item)
             contig_data = np.ascontiguousarray(val,dtype=np.float64)
             data = <double*>np.PyArray_DATA(contig_data)
             if val.ndim == 2:
@@ -161,7 +154,7 @@ cdef bool readOptions(XMLNode node, dc) except False:
             elif val.ndim == 1:
                 listbase.setContent(data, val.shape[0])
             else:
-                raise Exception("Only 1 or 2 dimensions are allowed")
+                raise AstraError("Only 1 or 2 dimensions are allowed")
         else:
             if isinstance(val, builtins.bool):
                 val = int(val)
@@ -169,18 +162,14 @@ cdef bool readOptions(XMLNode node, dc) except False:
     return True
 
 cdef configToDict(Config *cfg):
-    return XMLNode2dict(cfg.self)
+    cdef XMLConfig* xmlcfg;
+    xmlcfg = dynamic_cast_XMLConfig(cfg);
+    if not xmlcfg:
+        return None
+    return XMLNode2dict(xmlcfg.self)
 
-def castString3(input):
+def castString(input):
     return input.decode('utf-8')
-
-def castString2(input):
-    return input
-
-if six.PY3:
-    castString = castString3
-else:
-    castString = castString2
 
 def stringToPythonValue(inputIn):
     input = castString(inputIn)
@@ -226,71 +215,136 @@ cdef XMLNode2dict(XMLNode node):
     cdef list[XMLNode].iterator it
     dct = {}
     opts = {}
-    if node.hasAttribute(six.b('type')):
-        dct['type'] = castString(node.getAttribute(six.b('type')))
+    if node.hasAttribute(b'type'):
+        dct['type'] = castString(node.getAttribute(b'type'))
     nodes = node.getNodes()
     it = nodes.begin()
     while it != nodes.end():
         subnode = deref(it)
         if castString(subnode.getName())=="Option":
-            if subnode.hasAttribute('value'):
-                opts[castString(subnode.getAttribute('key'))] = stringToPythonValue(subnode.getAttribute('value'))
+            if subnode.hasAttribute(b'value'):
+                opts[castString(subnode.getAttribute(b'key'))] = stringToPythonValue(subnode.getAttribute(b'value'))
             else:
-                opts[castString(subnode.getAttribute('key'))] = stringToPythonValue(subnode.getContent())
+                opts[castString(subnode.getAttribute(b'key'))] = stringToPythonValue(subnode.getContent())
         else:
             dct[castString(subnode.getName())] = stringToPythonValue(subnode.getContent())
         inc(it)
     if len(opts)>0: dct['options'] = opts
     return dct
 
-cdef CFloat32VolumeData3D* linkVolFromGeometry(CVolumeGeometry3D *pGeometry, data) except NULL:
+def getDLPackCapsule(data):
+    # backward compatibility: check if the object is a dltensor capsule already
+    if PyCapsule_IsValid(data, "dltensor"):
+        return data
+    if not hasattr(data, "__dlpack__"):
+        return None
+    capsule = None
+    # TODO: investigate the stream argument to __dlpack__().
+    try:
+        capsule = data.__dlpack__(max_version = (1,0))
+    except AttributeError:
+        return None
+    except TypeError:
+        # unsupported max_version argument raises a TypeError
+        pass
+    if capsule is not None:
+        return capsule
+
+    try:
+        capsule = data.__dlpack__()
+    except AttributeError:
+        return None
+    return capsule
+
+cdef CFloat32VolumeData3D* linkVolFromGeometry(const CVolumeGeometry3D &pGeometry, data) except NULL:
     cdef CFloat32VolumeData3D * pDataObject3D = NULL
-    geom_shape = (pGeometry.getGridSliceCount(), pGeometry.getGridRowCount(), pGeometry.getGridColCount())
-    if isinstance(data, np.ndarray):
-        data_shape = data.shape
-    elif isinstance(data, GPULink):
-        data_shape = (data.z, data.y, data.x)
-    if geom_shape != data_shape:
-        raise ValueError(
-            "The dimensions of the data do not match those specified in the geometry: {} != {}".format(data_shape, geom_shape))
+    cdef CDataStorage * pStorage
+    cdef string dlerror = b""
 
-    if isinstance(data, np.ndarray):
-        checkArrayForLink(data)
-        pCustom = <CFloat32CustomMemory*> new CFloat32CustomPython(data)
-        pDataObject3D = new CFloat32VolumeData3DMemory(pGeometry, pCustom)
-    elif isinstance(data, GPULink):
+    # TODO: investigate the stream argument to __dlpack__().
+    capsule = getDLPackCapsule(data)
+    if capsule is not None:
+        pDataObject3D = getDLTensor(capsule, pGeometry, dlerror)
+        if not pDataObject3D:
+            raise ValueError("Failed to link dlpack array: " + wrap_from_bytes(dlerror))
+        return pDataObject3D
+
+    if isinstance(data, GPULink):
+        geom_shape = (pGeometry.getGridSliceCount(), pGeometry.getGridRowCount(), pGeometry.getGridColCount())
+        data_shape = (data.z, data.y, data.x)
+        if geom_shape != data_shape:
+            raise ValueError("The dimensions of the data {} do not match those "
+                             "specified in the geometry {}".format(data_shape, geom_shape))
+
         IF HAVE_CUDA==True:
             hnd = wrapHandle(<float*>PyLong_AsVoidPtr(data.ptr), data.x, data.y, data.z, data.pitch/4)
-            pDataObject3D = new CFloat32VolumeData3DGPU(pGeometry, hnd)
+            pStorage = new CDataGPU(hnd)
         ELSE:
-            raise NotImplementedError("CUDA support is not enabled in ASTRA")
-    else:
-        raise TypeError("data should be a numpy.ndarray or a GPULink object")
-    return pDataObject3D
+            raise AstraError("CUDA support is not enabled in ASTRA")
+        pDataObject3D = new CFloat32VolumeData3D(pGeometry, pStorage)
+        return pDataObject3D
 
-cdef CFloat32ProjectionData3D* linkProjFromGeometry(CProjectionGeometry3D *pGeometry, data) except NULL:
+    raise TypeError("Data should be an array with DLPack support, or a GPULink object")
+
+
+cdef CFloat32ProjectionData3D* linkProjFromGeometry(const CProjectionGeometry3D &pGeometry, data) except NULL:
     cdef CFloat32ProjectionData3D * pDataObject3D = NULL
-    geom_shape = (pGeometry.getDetectorRowCount(), pGeometry.getProjectionCount(), pGeometry.getDetectorColCount())
-    if isinstance(data, np.ndarray):
-        data_shape = data.shape
-    elif isinstance(data, GPULink):
-        data_shape = (data.z, data.y, data.x)
-    if geom_shape != data_shape:
-        raise ValueError(
-            "The dimensions of the data do not match those specified in the geometry: {} != {}".format(data_shape, geom_shape))
+    cdef CDataStorage * pStorage
+    cdef string dlerror = b""
 
-    if isinstance(data, np.ndarray):
-        checkArrayForLink(data)
-        pCustom = <CFloat32CustomMemory*> new CFloat32CustomPython(data)
-        pDataObject3D = new CFloat32ProjectionData3DMemory(pGeometry, pCustom)
-    elif isinstance(data, GPULink):
+    # TODO: investigate the stream argument to __dlpack__().
+    capsule = getDLPackCapsule(data)
+    if capsule is not None:
+        pDataObject3D = getDLTensor(capsule, pGeometry, dlerror)
+        if not pDataObject3D:
+            raise ValueError("Failed to link dlpack array: " + wrap_from_bytes(dlerror))
+        return pDataObject3D
+
+    if isinstance(data, GPULink):
+        geom_shape = (pGeometry.getDetectorRowCount(), pGeometry.getProjectionCount(), pGeometry.getDetectorColCount())
+        data_shape = (data.z, data.y, data.x)
+        if geom_shape != data_shape:
+            raise ValueError("The dimensions of the data {} do not match those "
+                             "specified in the geometry {}".format(data_shape, geom_shape))
+
         IF HAVE_CUDA==True:
             hnd = wrapHandle(<float*>PyLong_AsVoidPtr(data.ptr), data.x, data.y, data.z, data.pitch/4)
-            pDataObject3D = new CFloat32ProjectionData3DGPU(pGeometry, hnd)
+            pStorage = new CDataGPU(hnd)
         ELSE:
-            raise NotImplementedError("CUDA support is not enabled in ASTRA")
-    else:
-        raise TypeError("data should be a numpy.ndarray or a GPULink object")
-    return pDataObject3D
+            raise AstraError("CUDA support is not enabled in ASTRA")
+        pDataObject3D = new CFloat32ProjectionData3D(pGeometry, pStorage)
+        return pDataObject3D
 
+    raise TypeError("Data should be an array with DLPack support, or a GPULink object")
 
+cdef unique_ptr[CProjectionGeometry3D] createProjectionGeometry3D(geometry) except *:
+    cdef XMLConfig *cfg
+    cdef unique_ptr[CProjectionGeometry3D] pGeometry
+
+    cfg = dictToConfig(b'ProjectionGeometry', geometry)
+    tpe = cfg.self.getAttribute(b'type')
+    pGeometry = constructProjectionGeometry3D(tpe)
+    if not pGeometry:
+        raise ValueError("'{}' is not a valid 3D geometry type".format(tpe))
+
+    if not pGeometry.get().initialize(cfg[0]):
+        del cfg
+        raise AstraError('Geometry class could not be initialized', append_log=True)
+
+    del cfg
+
+    return move(pGeometry)
+
+cdef unique_ptr[CVolumeGeometry3D] createVolumeGeometry3D(geometry) except *:
+    cdef XMLConfig *cfg
+    cdef CVolumeGeometry3D * pGeometry
+    cfg = dictToConfig(b'VolumeGeometry', geometry)
+    pGeometry = new CVolumeGeometry3D()
+    if not pGeometry.initialize(cfg[0]):
+        del cfg
+        del pGeometry
+        raise AstraError('Geometry class could not be initialized', append_log=True)
+
+    del cfg
+
+    return unique_ptr[CVolumeGeometry3D](pGeometry)

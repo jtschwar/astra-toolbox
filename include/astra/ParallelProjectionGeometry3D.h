@@ -83,7 +83,7 @@ public:
 								  int _iDetectorColCount,
 								  float32 _fDetectorWidth, 
 								  float32 _fDetectorHeight, 
-								  const float32* _pfProjectionAngles);
+								  std::vector<float32> &&_pfProjectionAngles);
 
 	/** Copy constructor. 
 	 */
@@ -116,7 +116,7 @@ public:
 					int _iDetectorColCount,
 					float32 _fDetectorWidth, 
 					float32 _fDetectorHeight, 
-					const float32* _pfProjectionAngles);
+					std::vector<float32> &&_pfProjectionAngles);
 
 	/** Create a hard copy. 
 	*/
@@ -140,11 +140,6 @@ public:
 	 * @return true if _sType == "parallel".
 	 */
 	 virtual bool isOfType(const std::string& _sType) const;
-
-	 /**
-	  * Returns a vector giving the projection direction for a projection and detector index
-	  */
-	virtual CVector3D getProjectionDirection(int _iProjectionIndex, int _iDetectorIndex) const;
 
 	virtual void projectPoint(double fX, double fY, double fZ,
 	                          int iAngleIndex,

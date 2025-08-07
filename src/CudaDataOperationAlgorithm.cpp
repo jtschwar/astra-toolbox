@@ -29,19 +29,17 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/CudaDataOperationAlgorithm.h"
 
-#include "astra/cuda/2d/algo.h"
-#include "astra/cuda/2d/darthelper.h"
 #include "astra/cuda/2d/astra.h"
-#include "astra/cuda/2d/arith.h"
 
 #include "astra/AstraObjectManager.h"
+
+#include "astra/Logging.h"
+
+#include <algorithm>
 
 using namespace std;
 
 namespace astra {
-
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CCudaDataOperationAlgorithm::type = "DataOperation_CUDA";
 
 //----------------------------------------------------------------------------------------
 // Constructor
@@ -62,44 +60,34 @@ CCudaDataOperationAlgorithm::~CCudaDataOperationAlgorithm()
 // Initialize - Config
 bool CCudaDataOperationAlgorithm::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("CCudaDataOperationAlgorithm", this, _cfg);
+	ConfigReader<CAlgorithm> CR("CCudaDataOperationAlgorithm", this, _cfg);
 
 	// operation
-	XMLNode node = _cfg.self.getSingleNode("Operation");
-	ASTRA_CONFIG_CHECK(node, "CCudaDataOperationAlgorithm", "No Operation tag specified.");
-	m_sOperation = node.getContent();
+	if (!CR.getRequiredString("Operation", m_sOperation))
+		return false;
 	m_sOperation.erase(std::remove(m_sOperation.begin(), m_sOperation.end(), ' '), m_sOperation.end());
-	CC.markNodeParsed("Operation");
 
 	// data
-	node = _cfg.self.getSingleNode("DataId");
-	ASTRA_CONFIG_CHECK(node, "CCudaDataOperationAlgorithm", "No DataId tag specified.");
-	vector<string> data = node.getContentArray();
-	for (vector<string>::iterator it = data.begin(); it != data.end(); ++it){
-		int id = StringUtil::stringToInt(*it);
-		m_pData.push_back(dynamic_cast<CFloat32Data2D*>(CData2DManager::getSingleton().get(id)));
+	vector<int> data;
+	if (!CR.getRequiredIntArray("DataId", data))
+		return false;
+	for (vector<int>::iterator it = data.begin(); it != data.end(); ++it){
+		m_pData.push_back(dynamic_cast<CFloat32Data2D*>(CData2DManager::getSingleton().get(*it)));
 	}
-	CC.markNodeParsed("DataId");
 
-	// scalar
-	node = _cfg.self.getSingleNode("Scalar");
-	ASTRA_CONFIG_CHECK(node, "CCudaDataOperationAlgorithm", "No Scalar tag specified.");
-	m_fScalar = node.getContentNumericalArray();
-	CC.markNodeParsed("Scalar");
+	bool ok = true;
 
-	// Option: GPU number
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUindex", -1);
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUIndex", m_iGPUIndex);
-	CC.markOptionParsed("GPUindex");
-	if (!_cfg.self.hasOption("GPUindex"))
-		CC.markOptionParsed("GPUIndex");
+	ok &= CR.getRequiredNumericalArray("Scalar", m_fScalar);
 
-	if (_cfg.self.hasOption("MaskId")) {
-		int id = _cfg.self.getOptionInt("MaskId");
+	if (CR.hasOption("GPUIndex"))
+		ok &= CR.getOptionInt("GPUIndex", m_iGPUIndex, -1);
+	else
+		ok &= CR.getOptionInt("GPUindex", m_iGPUIndex, -1);
+
+	int id = -1;
+	if (CR.getOptionID("MaskId", id)) {
 		m_pMask = dynamic_cast<CFloat32Data2D*>(CData2DManager::getSingleton().get(id));
 	}
-	CC.markOptionParsed("MaskId");
 
 	_check();
 
@@ -118,7 +106,7 @@ bool CCudaDataOperationAlgorithm::initialize(const Config& _cfg)
 
 //----------------------------------------------------------------------------------------
 // Iterate
-void CCudaDataOperationAlgorithm::run(int _iNrIterations)
+bool CCudaDataOperationAlgorithm::run(int _iNrIterations)
 {
 	// check initialized
 	ASTRA_ASSERT(m_bIsInitialized);
@@ -161,6 +149,7 @@ void CCudaDataOperationAlgorithm::run(int _iNrIterations)
 		astraCUDA::processVolCopy<astraCUDA::opAdd>(m_pData[0]->getData(), m_pData[1]->getDataConst(), dims);
 	}
 
+	return true;
 }
 
 //----------------------------------------------------------------------------------------
@@ -173,23 +162,6 @@ bool CCudaDataOperationAlgorithm::_check()
 	m_bIsInitialized = true;
 	return true;
 }
-
-//---------------------------------------------------------------------------------------
-// Information - All
-map<string,boost::any> CCudaDataOperationAlgorithm::getInformation()
-{
-	map<string,boost::any> res;
-	// TODO: add PDART-specific options
-	return mergeMap<string,boost::any>(CAlgorithm::getInformation(), res);
-}
-
-//---------------------------------------------------------------------------------------
-// Information - Specific
-boost::any CCudaDataOperationAlgorithm::getInformation(std::string _sIdentifier)
-{
-	return NULL;
-}
-
 
 } // namespace astra
 

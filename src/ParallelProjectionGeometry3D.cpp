@@ -27,6 +27,7 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/ParallelProjectionGeometry3D.h"
 
+#include "astra/XMLConfig.h"
 #include "astra/GeometryUtil3D.h"
 
 #include <cstring>
@@ -51,7 +52,7 @@ CParallelProjectionGeometry3D::CParallelProjectionGeometry3D(int _iProjectionAng
 															 int _iDetectorColCount, 
 															 float32 _fDetectorWidth, 
 															 float32 _fDetectorHeight, 
-															 const float32* _pfProjectionAngles) :
+															 std::vector<float32> &&_pfProjectionAngles) :
 	CProjectionGeometry3D() 
 {
 	initialize(_iProjectionAngleCount, 
@@ -59,7 +60,7 @@ CParallelProjectionGeometry3D::CParallelProjectionGeometry3D(int _iProjectionAng
 			   _iDetectorColCount, 
 			   _fDetectorWidth, 
 			   _fDetectorHeight, 
-			   _pfProjectionAngles);
+			   std::move(_pfProjectionAngles));
 }
 
 //----------------------------------------------------------------------------------------
@@ -73,8 +74,7 @@ CParallelProjectionGeometry3D::~CParallelProjectionGeometry3D()
 // Initialize - Config
 bool CParallelProjectionGeometry3D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CProjectionGeometry3D> CC("ParallelProjectionGeometry3D", this, _cfg);	
+	ConfigReader<CProjectionGeometry3D> CR("ParallelProjectionGeometry3D", this, _cfg);	
 	
 
 	// initialization of parent class
@@ -93,14 +93,14 @@ bool CParallelProjectionGeometry3D::initialize(int _iProjectionAngleCount,
 											   int _iDetectorColCount, 
 											   float32 _fDetectorWidth, 
 											   float32 _fDetectorHeight, 
-											   const float32* _pfProjectionAngles)
+											   std::vector<float32> &&_pfProjectionAngles)
 {
 	_initialize(_iProjectionAngleCount, 
 			    _iDetectorRowCount, 
 			    _iDetectorColCount, 
 			    _fDetectorWidth, 
 			    _fDetectorHeight, 
-			    _pfProjectionAngles);
+			    std::move(_pfProjectionAngles));
 
 	// success
 	m_bInitialized = _check();
@@ -119,8 +119,7 @@ CProjectionGeometry3D* CParallelProjectionGeometry3D::clone() const
 	res->m_iDetectorTotCount		= m_iDetectorTotCount;
 	res->m_fDetectorSpacingX		= m_fDetectorSpacingX;
 	res->m_fDetectorSpacingY		= m_fDetectorSpacingY;
-	res->m_pfProjectionAngles		= new float32[m_iProjectionAngleCount];
-	memcpy(res->m_pfProjectionAngles, m_pfProjectionAngles, sizeof(float32)*m_iProjectionAngleCount);
+	res->m_pfProjectionAngles		= m_pfProjectionAngles;
 	return res;
 }
 
@@ -163,28 +162,17 @@ bool CParallelProjectionGeometry3D::isOfType(const std::string& _sType) const
 // Get the configuration object
 Config* CParallelProjectionGeometry3D::getConfiguration() const 
 {
-	Config* cfg = new Config();
-	cfg->initialize("ProjectionGeometry3D");
-	cfg->self.addAttribute("type", "parallel3d");
-	cfg->self.addChildNode("DetectorRowCount", m_iDetectorRowCount);
-	cfg->self.addChildNode("DetectorColCount", m_iDetectorColCount);
-	cfg->self.addChildNode("DetectorSpacingX", m_fDetectorSpacingX);
-	cfg->self.addChildNode("DetectorSpacingY", m_fDetectorSpacingY);
-	cfg->self.addChildNode("ProjectionAngles", m_pfProjectionAngles, m_iProjectionAngleCount);
-	return cfg;
+	ConfigWriter CW("ProjectionGeometry3D", "parallel3d");
+
+	CW.addInt("DetectorRowCount", m_iDetectorRowCount);
+	CW.addInt("DetectorColCount", m_iDetectorColCount);
+	CW.addNumerical("DetectorSpacingX", m_fDetectorSpacingX);
+	CW.addNumerical("DetectorSpacingY", m_fDetectorSpacingY);
+	CW.addNumericalArray("ProjectionAngles", &m_pfProjectionAngles[0], m_iProjectionAngleCount);
+
+	return CW.getConfig();
 }
 //----------------------------------------------------------------------------------------
-
-CVector3D CParallelProjectionGeometry3D::getProjectionDirection(int _iProjectionIndex, int _iDetectorIndex) const
-{
-	float fTheta = m_pfProjectionAngles[_iProjectionIndex];
-
-	float fDirX = cosf(fTheta);
-	float fDirY = sinf(fTheta);
-	float fDirZ = 0.0f;
-
-	return CVector3D(fDirX, fDirY, fDirZ);
-}
 
 void CParallelProjectionGeometry3D::projectPoint(double fX, double fY, double fZ,
                                                  int iAngleIndex,

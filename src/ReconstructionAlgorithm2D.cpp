@@ -78,105 +78,67 @@ void CReconstructionAlgorithm2D::clear()
 // Initialize - Config
 bool CReconstructionAlgorithm2D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("ReconstructionAlgorithm2D", this, _cfg);
-	
-	// projector
-	XMLNode node = _cfg.self.getSingleNode("ProjectorId");
-	if (requiresProjector()) {
-		ASTRA_CONFIG_CHECK(node, "Reconstruction2D", "No ProjectorId tag specified.");
-	}
-	m_pProjector = 0;
+	ConfigReader<CAlgorithm> CR("ReconstructionAlgorithm2D", this, _cfg);
+
+	bool ok = true;
 	int id = -1;
-	if (node) {
-		id = StringUtil::stringToInt(node.getContent(), -1);
+
+	m_pProjector = 0;
+	if (CR.getID("ProjectorId", id)) {
 		m_pProjector = CProjector2DManager::getSingleton().get(id);
 		if (!m_pProjector) {
-			// Report this explicitly since projector is optional
 			ASTRA_ERROR("ProjectorId is not a valid id");
+			return false;
 		}
 	}
-	CC.markNodeParsed("ProjectorId");
 
-	// sinogram data
-	node = _cfg.self.getSingleNode("ProjectionDataId");
-	ASTRA_CONFIG_CHECK(node, "Reconstruction2D", "No ProjectionDataId tag specified.");
-	id = StringUtil::stringToInt(node.getContent(), -1);
+	ok &= CR.getRequiredID("ProjectionDataId", id);
 	m_pSinogram = dynamic_cast<CFloat32ProjectionData2D*>(CData2DManager::getSingleton().get(id));
-	CC.markNodeParsed("ProjectionDataId");
 
-	// reconstruction data
-	node = _cfg.self.getSingleNode("ReconstructionDataId");
-	ASTRA_CONFIG_CHECK(node, "Reconstruction2D", "No ReconstructionDataId tag specified.");
-	id = StringUtil::stringToInt(node.getContent(), -1);
+	ok &= CR.getRequiredID("ReconstructionDataId", id);
 	m_pReconstruction = dynamic_cast<CFloat32VolumeData2D*>(CData2DManager::getSingleton().get(id));
-	CC.markNodeParsed("ReconstructionDataId");
+
+	if (requiresProjector()) {
+		ASTRA_CONFIG_CHECK(m_pProjector, "Reconstruction2D", "No projector specified.");
+	}
 
 	// fixed mask
-	if (_cfg.self.hasOption("ReconstructionMaskId")) {
+	if (CR.getOptionID("ReconstructionMaskId", id)) {
 		m_bUseReconstructionMask = true;
-		id = StringUtil::stringToInt(_cfg.self.getOption("ReconstructionMaskId"), -1);
 		m_pReconstructionMask = dynamic_cast<CFloat32VolumeData2D*>(CData2DManager::getSingleton().get(id));
-		ASTRA_CONFIG_CHECK(m_pReconstructionMask, "Reconstruction2D", "Invalid ReconstructionMaskId.");
 	}
-	CC.markOptionParsed("ReconstructionMaskId");
 
 	// fixed mask
-	if (_cfg.self.hasOption("SinogramMaskId")) {
+	if (CR.getOptionID("SinogramMaskId", id)) {
 		m_bUseSinogramMask = true;
-		id = StringUtil::stringToInt(_cfg.self.getOption("SinogramMaskId"), -1);
 		m_pSinogramMask = dynamic_cast<CFloat32ProjectionData2D*>(CData2DManager::getSingleton().get(id));
-		ASTRA_CONFIG_CHECK(m_pSinogramMask, "ReconstructionAlgorithm2D", "Invalid SinogramMaskId.");
 	}
-	CC.markOptionParsed("SinogramMaskId");
 
 	// Constraints - NEW
-	if (_cfg.self.hasOption("MinConstraint")) {
+	if (CR.hasOption("MinConstraint")) {
 		m_bUseMinConstraint = true;
-		try {
-			m_fMinValue = _cfg.self.getOptionNumerical("MinConstraint", 0.0f);
-		} catch (const astra::StringUtil::bad_cast &e) {
-			m_fMinValue = 0.0f;
-			ASTRA_ERROR("MinConstraint must be numerical");
-		}
-		CC.markOptionParsed("MinConstraint");
+		ok &= CR.getOptionNumerical("MinConstraint", m_fMinValue, 0.0f);
 	} else {
 		// Constraint - OLD
-		m_bUseMinConstraint = _cfg.self.getOptionBool("UseMinConstraint", false);
-		CC.markOptionParsed("UseMinConstraint");
+		ok &= CR.getOptionBool("UseMinConstraint", m_bUseMinConstraint, false);
 		if (m_bUseMinConstraint) {
-			try {
-				m_fMinValue = _cfg.self.getOptionNumerical("MinConstraintValue", 0.0f);
-			} catch (const astra::StringUtil::bad_cast &e) {
-				m_fMinValue = 0.0f;
-				ASTRA_ERROR("MinConstraintValue must be numerical");
-			}
-			CC.markOptionParsed("MinConstraintValue");
+			ok &= CR.getOptionNumerical("MinConstraintValue", m_fMinValue, 0.0f);
+			ASTRA_WARN("UseMinConstraint/MinConstraintValue are deprecated. Use \"MinConstraint\" instead.");
 		}
 	}
-	if (_cfg.self.hasOption("MaxConstraint")) {
+	if (CR.hasOption("MaxConstraint")) {
 		m_bUseMaxConstraint = true;
-		try {
-			m_fMaxValue = _cfg.self.getOptionNumerical("MaxConstraint", 255.0f);
-		} catch (const astra::StringUtil::bad_cast &e) {
-			m_fMinValue = 255.0f;
-			ASTRA_ERROR("MaxConstraint must be numerical");
-		}
-		CC.markOptionParsed("MaxConstraint");
+		ok &= CR.getOptionNumerical("MaxConstraint", m_fMaxValue, 255.0f);
 	} else {
 		// Constraint - OLD
-		m_bUseMaxConstraint = _cfg.self.getOptionBool("UseMaxConstraint", false);
-		CC.markOptionParsed("UseMaxConstraint");
+		ok &= CR.getOptionBool("UseMaxConstraint", m_bUseMaxConstraint, false);
 		if (m_bUseMaxConstraint) {
-			try {
-				m_fMaxValue = _cfg.self.getOptionNumerical("MaxConstraintValue", 255.0f);
-			} catch (const astra::StringUtil::bad_cast &e) {
-				m_fMaxValue = 255.0f;
-				ASTRA_ERROR("MaxConstraintValue must be numerical");
-			}
-			CC.markOptionParsed("MaxConstraintValue");
+			ok &= CR.getOptionNumerical("MaxConstraintValue", m_fMaxValue, 255.0f);
+			ASTRA_WARN("UseMaxConstraint/MaxConstraintValue are deprecated. Use \"MaxConstraint\" instead.");
 		}
 	}
+	if (!ok)
+		return false;
 
 	// return success
 	return _check();
@@ -246,61 +208,14 @@ bool CReconstructionAlgorithm2D::_check()
 
 	// check compatibility between projector and data classes
 	if (requiresProjector()) {
-		ASTRA_CONFIG_CHECK(m_pSinogram->getGeometry()->isEqual(m_pProjector->getProjectionGeometry()), "Reconstruction2D", "Projection Data not compatible with the specified Projector.");
-		ASTRA_CONFIG_CHECK(m_pReconstruction->getGeometry()->isEqual(m_pProjector->getVolumeGeometry()), "Reconstruction2D", "Reconstruction Data not compatible with the specified Projector.");
+		ASTRA_CONFIG_CHECK(m_pSinogram->getGeometry().isEqual(m_pProjector->getProjectionGeometry()), "Reconstruction2D", "Projection Data not compatible with the specified Projector.");
+		ASTRA_CONFIG_CHECK(m_pReconstruction->getGeometry().isEqual(m_pProjector->getVolumeGeometry()), "Reconstruction2D", "Reconstruction Data not compatible with the specified Projector.");
 	}
 
 	// success
 	return true;
 }
 
-//---------------------------------------------------------------------------------------
-// Information - All
-map<string,boost::any> CReconstructionAlgorithm2D::getInformation() 
-{
-	map<string, boost::any> res;
-	res["ProjectorId"] = getInformation("ProjectorId");
-	res["ProjectionDataId"] = getInformation("ProjectionDataId");
-	res["ReconstructionDataId"] = getInformation("ReconstructionDataId");
-	res["UseMinConstraint"] = getInformation("UseMinConstraint");
-	res["MinConstraintValue"] = getInformation("MinConstraintValue");
-	res["UseMaxConstraint"] = getInformation("UseMaxConstraint");
-	res["MaxConstraintValue"] = getInformation("MaxConstraintValue");
-	res["ReconstructionMaskId"] = getInformation("ReconstructionMaskId");
-	return mergeMap<string,boost::any>(CAlgorithm::getInformation(), res);
-};
-
-//---------------------------------------------------------------------------------------
-// Information - Specific
-boost::any CReconstructionAlgorithm2D::getInformation(std::string _sIdentifier) 
-{
-	if (_sIdentifier == "UseMinConstraint")		{ return m_bUseMinConstraint ? string("yes") : string("no"); }
-	if (_sIdentifier == "MinConstraintValue")	{ return m_fMinValue; }
-	if (_sIdentifier == "UseMaxConstraint")		{ return m_bUseMaxConstraint ? string("yes") : string("no"); }
-	if (_sIdentifier == "MaxConstraintValue")	{ return m_fMaxValue; }
-	if (_sIdentifier == "ProjectorId")	{ 
-		int iIndex = CProjector2DManager::getSingleton().getIndex(m_pProjector);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");	
-	}
-	if (_sIdentifier == "ProjectionDataId") {
-		int iIndex = CData2DManager::getSingleton().getIndex(m_pSinogram);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	} 
-	if (_sIdentifier == "ReconstructionDataId") {
-		int iIndex = CData2DManager::getSingleton().getIndex(m_pReconstruction);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	}
-	if (_sIdentifier == "ReconstructionMaskId") {
-		if (!m_bUseReconstructionMask) return string("not used");
-		int iIndex = CData2DManager::getSingleton().getIndex(m_pReconstructionMask);
-		if (iIndex != 0) return iIndex;
-		return std::string("not in manager");
-	}
-	return CAlgorithm::getInformation(_sIdentifier);
-};
 //----------------------------------------------------------------------------------------
 
 } // namespace astra

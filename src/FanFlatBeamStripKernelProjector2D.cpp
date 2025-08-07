@@ -32,13 +32,12 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/DataProjectorPolicies.h"
 
+#include "astra/Logging.h"
+
 using namespace std;
 using namespace astra;
 
 #include "astra/FanFlatBeamStripKernelProjector2D.inl"
-
-// type of the projector, needed to register with CProjectorFactory
-std::string CFanFlatBeamStripKernelProjector2D::type = "strip_fanflat";
 
 //----------------------------------------------------------------------------------------
 // default constructor
@@ -49,8 +48,8 @@ CFanFlatBeamStripKernelProjector2D::CFanFlatBeamStripKernelProjector2D()
 
 //----------------------------------------------------------------------------------------
 // constructor
-CFanFlatBeamStripKernelProjector2D::CFanFlatBeamStripKernelProjector2D(CFanFlatProjectionGeometry2D* _pProjectionGeometry,
-																	   CVolumeGeometry2D* _pReconstructionGeometry)
+CFanFlatBeamStripKernelProjector2D::CFanFlatBeamStripKernelProjector2D(const CFanFlatProjectionGeometry2D &_pProjectionGeometry,
+																	   const CVolumeGeometry2D &_pReconstructionGeometry)
 
 {
 	_clear();
@@ -99,8 +98,6 @@ bool CFanFlatBeamStripKernelProjector2D::_check()
 // Initialize, use a Config object
 bool CFanFlatBeamStripKernelProjector2D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
 		clear();
@@ -118,8 +115,8 @@ bool CFanFlatBeamStripKernelProjector2D::initialize(const Config& _cfg)
 
 //---------------------------------------------------------------------------------------
 // Initialize
-bool CFanFlatBeamStripKernelProjector2D::initialize(CFanFlatProjectionGeometry2D* _pProjectionGeometry, 
-													 CVolumeGeometry2D* _pVolumeGeometry)
+bool CFanFlatBeamStripKernelProjector2D::initialize(const CFanFlatProjectionGeometry2D &_pProjectionGeometry,
+													 const CVolumeGeometry2D &_pVolumeGeometry)
 {
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -127,8 +124,8 @@ bool CFanFlatBeamStripKernelProjector2D::initialize(CFanFlatProjectionGeometry2D
 	}
 
 	// hardcopy geometries
-	m_pProjectionGeometry = _pProjectionGeometry->clone();
-	m_pVolumeGeometry = _pVolumeGeometry->clone();
+	m_pProjectionGeometry = _pProjectionGeometry.clone();
+	m_pVolumeGeometry = _pVolumeGeometry.clone();
 
 	// success
 	m_bIsInitialized = _check();

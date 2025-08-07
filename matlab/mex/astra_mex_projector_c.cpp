@@ -64,32 +64,29 @@ void astra_mex_projector_create(int nlhs, mxArray* plhs[], int nrhs, const mxArr
 	int iIndex = 0;
 
 	if (nrhs < 2) {
-		mexErrMsgTxt("Not enough arguments.  See the help document for a detailed argument list. \n");
-		return;
+		mexErrMsgTxt("Not enough arguments. See the help document for a detailed argument list.");
 	}
 
 	if (!mxIsStruct(prhs[1])) {
-		mexErrMsgTxt("Argument 1 not a valid MATLAB struct. \n");
+		mexErrMsgTxt("Argument 1 not a valid MATLAB struct.");
 	}
 
 
 	// turn MATLAB struct to an XML-based Config object
-	Config* cfg = structToConfig("Projector2D", prhs[1]);
+	XMLConfig* cfg = structToConfig("Projector2D", prhs[1]);
 
 	// create algorithm
 	CProjector2D* pProj = CProjector2DFactory::getSingleton().create(cfg->self.getAttribute("type"));
 	if (pProj == NULL) {
 		delete cfg;
-		mexErrMsgTxt("Unknown Projector2D. \n");
-		return;
+		mexErrMsgTxt("Unknown Projector2D type.");
 	}
 
 	// create algorithm
 	if (!pProj->initialize(*cfg)) {
 		delete cfg;
 		delete pProj;
-		mexErrMsgTxt("Unable to initialize Projector2D. \n");
-		return;
+		mexErrMsgWithAstraLog("Unable to initialize Projector2D.");
 	}
 	delete cfg;
 
@@ -112,8 +109,7 @@ void astra_mex_projector_delete(int nlhs, mxArray* plhs[], int nrhs, const mxArr
 {
 	// step1: read input
 	if (nrhs < 2) {
-		mexErrMsgTxt("Not enough arguments.  See the help document for a detailed argument list. \n");
-		return;
+		mexErrMsgTxt("Not enough arguments. See the help document for a detailed argument list.");
 	}
 
 	for (int i = 1; i < nrhs; i++) {
@@ -153,21 +149,19 @@ void astra_mex_projector_projection_geometry(int nlhs, mxArray* plhs[], int nrhs
 {
 	// step1: read input
 	if (nrhs < 2) {
-		mexErrMsgTxt("Not enough arguments.  See the help document for a detailed argument list. \n");
-		return;
+		mexErrMsgTxt("Not enough arguments. See the help document for a detailed argument list.");
 	}
 	int iPid = (int)(mxGetScalar(prhs[1]));
 
 	// step2: get projector
 	CProjector2D* pProjector = CProjector2DManager::getSingleton().get(iPid);
 	if (!pProjector || !pProjector->isInitialized()) {
-		mexErrMsgTxt("Projector not initialized.\n");
-		return;
+		mexErrMsgTxt("Projector could not be found or is not initialized.");
 	}
 
 	// step3: get projection_geometry and turn it into a MATLAB struct
 	if (1 <= nlhs) {
-		Config *cfg =  pProjector->getProjectionGeometry()->getConfiguration();
+		Config *cfg =  pProjector->getProjectionGeometry().getConfiguration();
 		plhs[0] = configToStruct(cfg);
 		delete cfg;
 	}
@@ -184,21 +178,19 @@ void astra_mex_projector_volume_geometry(int nlhs, mxArray* plhs[], int nrhs, co
 {
 	// step1: read input
 	if (nrhs < 2) {
-		mexErrMsgTxt("Not enough arguments.  See the help document for a detailed argument list. \n");
-		return;
+		mexErrMsgTxt("Not enough arguments. See the help document for a detailed argument list.");
 	}
 	int iPid = (int)(mxGetScalar(prhs[1]));
 
 	// step2: get projector
 	CProjector2D* pProjector = CProjector2DManager::getSingleton().get(iPid);
 	if (!pProjector || !pProjector->isInitialized()) {
-		mexErrMsgTxt("Projector not initialized.\n");
-		return;
+		mexErrMsgTxt("Projector could not be found or is not initialized.");
 	}
 
 	// step3: get projection_geometry and turn it into a MATLAB struct
 	if (1 <= nlhs) {
-		Config *cfg = pProjector->getVolumeGeometry()->getConfiguration();
+		Config *cfg = pProjector->getVolumeGeometry().getConfiguration();
 		plhs[0] = configToStruct(cfg);
 		delete cfg;
 	}
@@ -217,8 +209,7 @@ void astra_mex_projector_weights_single_ray(int nlhs, mxArray* plhs[], int nrhs,
 { 
 	// step1: get input
 	if (nrhs < 4) {
-		mexErrMsgTxt("Not enough arguments.  See the help document for a detailed argument list. \n");
-		return;
+		mexErrMsgTxt("Not enough arguments. See the help document for a detailed argument list.");
 	}
 	int iPid = (int)(mxGetScalar(prhs[1]));
 	int iProjectionIndex = (int)(mxGetScalar(prhs[2]));
@@ -227,8 +218,7 @@ void astra_mex_projector_weights_single_ray(int nlhs, mxArray* plhs[], int nrhs,
 	// step2: get projector
 	CProjector2D* pProjector = CProjector2DManager::getSingleton().get(iPid);
 	if (!pProjector || !pProjector->isInitialized()) {
-		mexErrMsgTxt("Projector not initialized.\n");
-		return;
+		mexErrMsgTxt("Projector could not be found or is not initialized.");
 	}
 	
 	// step3: create output vars
@@ -274,8 +264,7 @@ void astra_mex_projector_weights_projection(int nlhs, mxArray* plhs[], int nrhs,
 { 
 	// step1: get input
 	if (nrhs < 3) {
-		mexErrMsgTxt("Not enough arguments.  See the help document for a detailed argument list. \n");
-		return;
+		mexErrMsgTxt("Not enough arguments. See the help document for a detailed argument list.");
 	}
 	int iPid = (int)(mxGetScalar(prhs[1]));
 	int iProjectionIndex = (int)(mxGetScalar(prhs[2]));
@@ -283,13 +272,12 @@ void astra_mex_projector_weights_projection(int nlhs, mxArray* plhs[], int nrhs,
 	// step2: get projector
 	CProjector2D* pProjector = CProjector2DManager::getSingleton().get(iPid);
 	if (!pProjector || !pProjector->isInitialized()) {
-		mexErrMsgTxt("Projector not initialized.\n");
-		return;
+		mexErrMsgTxt("Projector could not be found or is not initialized.");
 	}
 
 	// step3: create output vars
 	SPixelWeight* pPixelsWheights = new SPixelWeight[pProjector->getProjectionWeightsCount(iProjectionIndex)];
-	int* piRayStoredPixelCount = new int[pProjector->getProjectionGeometry()->getDetectorCount()];
+	int* piRayStoredPixelCount = new int[pProjector->getProjectionGeometry().getDetectorCount()];
 
 	// step4: perform operation
 	pProjector->computeProjectionRayWeights(iProjectionIndex, pPixelsWheights, piRayStoredPixelCount);
@@ -297,9 +285,9 @@ void astra_mex_projector_weights_projection(int nlhs, mxArray* plhs[], int nrhs,
 	// step5: return output
 	if (1 <= nlhs) {
 		// get basic values
-		int iMatrixSize = pProjector->getVolumeGeometry()->getWindowLengthX() *
-						  pProjector->getVolumeGeometry()->getWindowLengthY();
-		int iDetectorCount = pProjector->getProjectionGeometry()->getDetectorCount();
+		int iMatrixSize = pProjector->getVolumeGeometry().getWindowLengthX() *
+						  pProjector->getVolumeGeometry().getWindowLengthY();
+		int iDetectorCount = pProjector->getProjectionGeometry().getDetectorCount();
 		int iTotalStoredPixelCount = 0;
 		for (int i = 0; i < iDetectorCount; i++) {
 			iTotalStoredPixelCount += piRayStoredPixelCount[i];
@@ -322,7 +310,7 @@ void astra_mex_projector_weights_projection(int nlhs, mxArray* plhs[], int nrhs,
 				rows[currentIndex + j] = pPixelsWheights[currentBase + j].m_iIndex;
 			}
 					
-			currentBase += pProjector->getProjectionWeightsCount(iProjectionIndex) / pProjector->getProjectionGeometry()->getDetectorCount();
+			currentBase += pProjector->getProjectionWeightsCount(iProjectionIndex) / pProjector->getProjectionGeometry().getDetectorCount();
 			currentIndex += piRayStoredPixelCount[i];
 		}
 		cols[0] = piRayStoredPixelCount[0];
@@ -347,23 +335,20 @@ void astra_mex_projector_matrix(int nlhs, mxArray* plhs[], int nrhs, const mxArr
 { 
 	// step1: get input
 	if (nrhs < 2) {
-		mexErrMsgTxt("Not enough arguments.  See the help document for a detailed argument list. \n");
-		return;
+		mexErrMsgTxt("Not enough arguments. See the help document for a detailed argument list.");
 	}
 	int iPid = (int)(mxGetScalar(prhs[1]));
 
 	// step2: get projector
 	CProjector2D* pProjector = CProjector2DManager::getSingleton().get(iPid);
 	if (!pProjector || !pProjector->isInitialized()) {
-		mexErrMsgTxt("Projector not initialized.\n");
-		return;
+		mexErrMsgTxt("Projector could not be found or is not initialized.");
 	}
 
 	CSparseMatrix* pMatrix = pProjector->getMatrix();
 	if (!pMatrix || !pMatrix->isInitialized()) {
-		mexErrMsgTxt("Couldn't initialize data object.\n");
 		delete pMatrix;
-		return;
+		mexErrMsgWithAstraLog("Couldn't initialize data object.");
 	}
 
 	// store data object
@@ -385,16 +370,14 @@ void astra_mex_projector_is_cuda(int nlhs, mxArray* plhs[], int nrhs, const mxAr
 { 
 	// step1: get input
 	if (nrhs < 2) {
-		mexErrMsgTxt("Not enough arguments.  See the help document for a detailed argument list. \n");
-		return;
+		mexErrMsgTxt("Not enough arguments. See the help document for a detailed argument list.");
 	}
 	int iPid = (int)(mxGetScalar(prhs[1]));
 
 	// step2: get projector
 	CProjector2D* pProjector = CProjector2DManager::getSingleton().get(iPid);
 	if (!pProjector || !pProjector->isInitialized()) {
-		mexErrMsgTxt("Projector not initialized.\n");
-		return;
+		mexErrMsgTxt("Projector could not be found or is not initialized.");
 	}
 
 #ifdef ASTRA_CUDA

@@ -151,7 +151,7 @@ public:
 
 	/** Create a hard copy. 
 	*/
-	CVolumeGeometry2D* clone();
+	CVolumeGeometry2D* clone() const;
 
 	/** Initialize the volume geometry with a config object.
 	 *
@@ -202,7 +202,7 @@ public:
 	 *
 	 * @return true if this geometry instance is the same as the one specified.
 	 */
-	virtual bool isEqual(CVolumeGeometry2D*) const;
+	virtual bool isEqual(const CVolumeGeometry2D&) const;
 
 	/** Get all settings in a Config object.
 	 *
@@ -378,10 +378,10 @@ public:
      */
 	float coordYToRowF(float32 _fCoordY) const;
 
-
+private:
 	//< For Config unused argument checking
 	ConfigCheckData* configCheckData;
-	friend class ConfigStackCheck<CVolumeGeometry2D>;
+	friend class ConfigReader<CVolumeGeometry2D>;
 };
 
 

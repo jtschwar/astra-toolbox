@@ -36,18 +36,18 @@ namespace astra {
 // TODO: Switch to a class hierarchy as with the 2D algorithms
 
 
-class CProjectionGeometry3D;
-class CParallelProjectionGeometry3D;
-class CParallelVecProjectionGeometry3D;
-class CConeProjectionGeometry3D;
-class CConeVecProjectionGeometry3D;
-class CVolumeGeometry3D;
-class CFloat32ProjectionData3DGPU;
+class CFloat32ProjectionData3D;
 class AstraSIRT3d_internal;
 
 using astraCUDA3d::Cuda3DProjectionKernel;
 using astraCUDA3d::ker3d_default;
+using astraCUDA3d::ker3d_matched_bp;
 using astraCUDA3d::ker3d_sum_square_weights;
+using astraCUDA3d::ker3d_fdk_weighting;
+using astraCUDA3d::ker3d_2d_weighting;
+using astraCUDA3d::SPar3DProjection;
+using astraCUDA3d::SConeProjection;
+
 
 
 class _AstraExport AstraSIRT3d {
@@ -67,7 +67,7 @@ public:
 	bool enableSuperSampling(unsigned int iVoxelSuperSampling,
 	                         unsigned int iDetectorSuperSampling);
 
-	void setRelaxation(float r);
+	bool setRelaxation(float r);
 
 	// Enable volume/sinogram masks
 	//
@@ -274,16 +274,6 @@ protected:
 	AstraCGLS3d_internal *pData;
 };
 
-bool convertAstraGeometry_dims(const CVolumeGeometry3D* pVolGeom,
-                               const CProjectionGeometry3D* pProjGeom,
-                               astraCUDA3d::SDimensions3D& dims);
-
-bool convertAstraGeometry(const CVolumeGeometry3D* pVolGeom,
-                          const CProjectionGeometry3D* pProjGeom,
-                          SPar3DProjection*& pParProjs,
-                          SConeProjection*& pConeProjs,
-                          astraCUDA3d::SProjectorParams3D& params);
-
 _AstraExport bool astraCudaFP(const float* pfVolume, float* pfProjections,
                       const CVolumeGeometry3D* pVolGeom,
                       const CProjectionGeometry3D* pProjGeom,
@@ -301,7 +291,7 @@ _AstraExport bool astraCudaBP_SIRTWeighted(float* pfVolume, const float* pfProje
                       const CProjectionGeometry3D* pProjGeom,
                       int iGPUIndex, int iVoxelSuperSampling);
 
-_AstraExport void uploadMultipleProjections(CFloat32ProjectionData3DGPU *proj,
+_AstraExport bool uploadMultipleProjections(CFloat32ProjectionData3D *proj,
                                             const float *data,
                                             unsigned int y_min,
                                             unsigned int y_max);

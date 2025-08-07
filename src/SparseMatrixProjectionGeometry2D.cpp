@@ -28,7 +28,9 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include "astra/SparseMatrixProjectionGeometry2D.h"
 
 #include "astra/AstraObjectManager.h"
+#include "astra/XMLConfig.h"
 
+#include "astra/Logging.h"
 
 using namespace std;
 
@@ -89,19 +91,19 @@ CSparseMatrixProjectionGeometry2D::~CSparseMatrixProjectionGeometry2D()
 // Initialize - Config
 bool CSparseMatrixProjectionGeometry2D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CProjectionGeometry2D> CC("SparseMatrixProjectionGeometry2D", this, _cfg);	
+	ConfigReader<CProjectionGeometry2D> CR("SparseMatrixProjectionGeometry2D", this, _cfg);	
 
 	// initialization of parent class
 	if (!CProjectionGeometry2D::initialize(_cfg))
 		return false;
 
+	int id = -1;
+
 	// get matrix
-	XMLNode node = _cfg.self.getSingleNode("MatrixID");
-	ASTRA_CONFIG_CHECK(node, "SparseMatrixProjectionGeometry2D", "No MatrixID tag specified.");
-	int id = StringUtil::stringToInt(node.getContent(), -1);
+	if (!CR.getRequiredID("MatrixID", id))
+		return false;
+	
 	m_pMatrix = CMatrixManager::getSingleton().get(id);
-	CC.markNodeParsed("MatrixID");
 
 	// success
 	m_bInitialized = _check();
@@ -151,19 +153,17 @@ bool CSparseMatrixProjectionGeometry2D::_check()
 
 //----------------------------------------------------------------------------------------
 // Clone
-CProjectionGeometry2D* CSparseMatrixProjectionGeometry2D::clone()
+CProjectionGeometry2D* CSparseMatrixProjectionGeometry2D::clone() const
 {
 	return new CSparseMatrixProjectionGeometry2D(*this);
 }
 
 //----------------------------------------------------------------------------------------
 // is equal
-bool CSparseMatrixProjectionGeometry2D::isEqual(CProjectionGeometry2D* _pGeom2) const
+bool CSparseMatrixProjectionGeometry2D::isEqual(const CProjectionGeometry2D &_pGeom2) const
 {
-	if (_pGeom2 == NULL) return false;
-
 	// try to cast argument to CSparseMatrixProjectionGeometry2D
-	CSparseMatrixProjectionGeometry2D* pGeom2 = dynamic_cast<CSparseMatrixProjectionGeometry2D*>(_pGeom2);
+	const CSparseMatrixProjectionGeometry2D* pGeom2 = dynamic_cast<const CSparseMatrixProjectionGeometry2D*>(&_pGeom2);
 	if (pGeom2 == NULL) return false;
 
 	// both objects must be initialized
@@ -190,25 +190,14 @@ bool CSparseMatrixProjectionGeometry2D::isOfType(const std::string& _sType)
 // Get the configuration object
 Config* CSparseMatrixProjectionGeometry2D::getConfiguration() const 
 {
-	Config* cfg = new Config();
-	cfg->initialize("ProjectionGeometry2D");
-	cfg->self.addAttribute("type", "sparse matrix");
-	cfg->self.addChildNode("DetectorCount", getDetectorCount());
-	cfg->self.addChildNode("DetectorWidth", getDetectorWidth());
-	cfg->self.addChildNode("ProjectionAngles", m_pfProjectionAngles, m_iProjectionAngleCount);
-	cfg->self.addChildNode("MatrixID", CMatrixManager::getSingleton().getIndex(m_pMatrix));
-	return cfg;
-}
+	ConfigWriter CW("ProjectionGeometry2D", "sparse matrix");
 
-//----------------------------------------------------------------------------------------
-CVector3D CSparseMatrixProjectionGeometry2D::getProjectionDirection(int _iProjectionIndex, int _iDetectorIndex)
-{
-	CVector3D vOutput(0.0f, 0.0f, 0.0f);
+	CW.addInt("DetectorCount", getDetectorCount());
+	CW.addNumerical("DetectorWidth", getDetectorWidth());
+	CW.addNumericalArray("ProjectionAngles", m_pfProjectionAngles, m_iProjectionAngleCount);
+	CW.addID("MatrixID", CMatrixManager::getSingleton().getIndex(m_pMatrix));
 
-	// not implemented, yet
-	ASTRA_ASSERT(false);
-
-	return vOutput;
+	return CW.getConfig();
 }
 
 } // end namespace astra

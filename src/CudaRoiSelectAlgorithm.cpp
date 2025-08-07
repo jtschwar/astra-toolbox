@@ -35,12 +35,11 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 
 #include "astra/AstraObjectManager.h"
 
+#include "astra/Logging.h"
+
 using namespace std;
 
 namespace astra {
-
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CCudaRoiSelectAlgorithm::type = "RoiSelect_CUDA";
 
 //----------------------------------------------------------------------------------------
 // Constructor
@@ -61,30 +60,23 @@ CCudaRoiSelectAlgorithm::~CCudaRoiSelectAlgorithm()
 // Initialize - Config
 bool CCudaRoiSelectAlgorithm::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("CudaDartRoiSelectAlgorithm", this, _cfg);
+	ConfigReader<CAlgorithm> CR("CudaDartRoiSelectAlgorithm", this, _cfg);
 
-	// reconstruction data
-	XMLNode node = _cfg.self.getSingleNode("DataId");
-	ASTRA_CONFIG_CHECK(node, "CudaRoiSelect", "No DataId tag specified.");
-	int id = StringUtil::stringToInt(node.getContent(), -1);
+	bool ok = true;
+	int id = -1;
+
+	ok &= CR.getRequiredID("DataId", id);
 	m_pData = dynamic_cast<CFloat32VolumeData2D*>(CData2DManager::getSingleton().get(id));
-	CC.markNodeParsed("DataId");
 
-	// Option: GPU number
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUindex", -1);
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUIndex", m_iGPUIndex);
-	CC.markOptionParsed("GPUindex");
-	if (!_cfg.self.hasOption("GPUindex"))
-		CC.markOptionParsed("GPUIndex");
+	if (CR.hasOption("GPUIndex"))
+		ok &= CR.getOptionInt("GPUIndex", m_iGPUIndex, -1);
+	else
+		ok &= CR.getOptionInt("GPUindex", m_iGPUIndex, -1);
 
-	// Option: Radius
-	try {
-		m_fRadius = _cfg.self.getOptionNumerical("Radius", 0.0f);
-	} catch (const StringUtil::bad_cast &e) {
-		ASTRA_CONFIG_CHECK(false, "CudaDartRoiSelect", "Radius must be numerical.");
-	}
-	CC.markOptionParsed("Radius");
+	ok &= CR.getOptionNumerical("Radius", m_fRadius, 0.0f);
+
+	if (!ok)
+		return false;
 
 	_check();
 
@@ -103,12 +95,12 @@ bool CCudaRoiSelectAlgorithm::initialize(const Config& _cfg)
 
 //----------------------------------------------------------------------------------------
 // Iterate
-void CCudaRoiSelectAlgorithm::run(int _iNrIterations)
+bool CCudaRoiSelectAlgorithm::run(int _iNrIterations)
 {
 	// check initialized
 	ASTRA_ASSERT(m_bIsInitialized);
 
-	const CVolumeGeometry2D& volgeom = *m_pData->getGeometry();
+	const CVolumeGeometry2D& volgeom = m_pData->getGeometry();
 	unsigned int width = volgeom.getGridColCount();
 	unsigned int height = volgeom.getGridRowCount();
 
@@ -118,6 +110,8 @@ void CCudaRoiSelectAlgorithm::run(int _iNrIterations)
 
 	astraCUDA::setGPUIndex(m_iGPUIndex);
 	astraCUDA::roiSelect(m_pData->getData(), m_fRadius, width, height);
+
+	return true;
 }
 
 //----------------------------------------------------------------------------------------
@@ -129,22 +123,6 @@ bool CCudaRoiSelectAlgorithm::_check()
 	m_bIsInitialized = true;
 	return true;
 }
-
-//---------------------------------------------------------------------------------------
-// Information - All
-map<string,boost::any> CCudaRoiSelectAlgorithm::getInformation()
-{
-	map<string,boost::any> res;
-	return mergeMap<string,boost::any>(CAlgorithm::getInformation(), res);
-}
-
-//---------------------------------------------------------------------------------------
-// Information - Specific
-boost::any CCudaRoiSelectAlgorithm::getInformation(std::string _sIdentifier)
-{
-	return NULL;
-}
-
 
 } // namespace astra
 

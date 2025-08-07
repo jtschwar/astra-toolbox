@@ -24,9 +24,8 @@
 # -----------------------------------------------------------------------
 
 from . import data3d_c as d
-import numpy as np
+from .pythonutils import GPULink
 
-from .pythonutils import GPULink, checkArrayForLink
 
 def create(datatype,geometry,data=None):
     """Create a 3D object.
@@ -43,28 +42,25 @@ def create(datatype,geometry,data=None):
     return d.create(datatype,geometry,data)
 
 def link(datatype, geometry, data):
-    """Link a 3D numpy array with the toolbox.
-        
+    """Link a 3D array with ASTRA from another library supporting dlpack,
+    such as numpy or pytorch.
+
     :param datatype: Data object type, '-vol' or '-sino'.
     :type datatype: :class:`string`
     :param geometry: Volume or projection geometry.
     :type geometry: :class:`dict`
-    :param data: Numpy array to link
-    :type data: :class:`numpy.ndarray`
-    :returns: :class:`int` -- the ID of the constructed object.
-    
+    :param data: Array to link. Needs to implement the dlpack protocol.
+    :type data: :class:`object`
+    :returns: :class:`int` -- the ID assigned to the linked object.
+
     """
-    if not isinstance(data,np.ndarray) and not isinstance(data,GPULink):
-        raise TypeError("Input should be a numpy ndarray or GPULink object")
-    if isinstance(data, np.ndarray):
-        checkArrayForLink(data)
     return d.create(datatype,geometry,data,True)
 
 
 def get(i):
     """Get a 3D object.
 
-    :param i: ID of object to get.
+    :param i: ID of object to get. Linked GPU arrays are not supported.
     :type i: :class:`int`
     :returns: :class:`numpy.ndarray` -- The object data.
 
@@ -74,7 +70,7 @@ def get(i):
 def get_shared(i):
     """Get a 3D object with memory shared between the ASTRA toolbox and numpy array.
 
-    :param i: ID of object to get.
+    :param i: ID of object to get. Linked GPU arrays are not supported.
     :type i: :class:`int`
     :returns: :class:`numpy.ndarray` -- The object data.
 
@@ -84,7 +80,7 @@ def get_shared(i):
 def get_single(i):
     """Get a 3D object in single precision.
 
-    :param i: ID of object to get.
+    :param i: ID of object to get. Linked GPU arrays are not supported.
     :type i: :class:`int`
     :returns: :class:`numpy.ndarray` -- The object data.
 
@@ -94,7 +90,7 @@ def get_single(i):
 def store(i,data):
     """Fill existing 3D object with data.
 
-    :param i: ID of object to fill.
+    :param i: ID of object to fill. Linked GPU arrays are not supported.
     :type i: :class:`int`
     :param data: Data to fill the object with, either a scalar or array.
     :type data: :class:`float` or :class:`numpy.ndarray`
@@ -123,6 +119,23 @@ def change_geometry(i, geometry):
     """
     return d.change_geometry(i, geometry)
 
+def shepp_logan(geometry, modified=True, returnData=True):
+    """Create a 3D data object with a Shepp-Logan phantom.
+
+    :param geometry: Volume geometry
+    :param modified: If False, generate the original Shepp-Logan phantom
+    :param returnData: If False, only return the ID of the new data object
+    :returns: :class:`int` or (:class:`int`, :class`numpy.ndarray`)
+
+    """
+    i = create('-vol', geometry)
+    d.shepp_logan(i, modified)
+    if returnData:
+      return i, get(i)
+    else:
+      return i
+
+
 def dimensions(i):
     """Get dimensions of a 3D object.
 
@@ -134,7 +147,7 @@ def dimensions(i):
     return d.dimensions(i)
 
 def delete(ids):
-    """Delete a 2D object.
+    """Delete a 3D object.
 
     :param ids: ID or list of ID's to delete.
     :type ids: :class:`int` or :class:`list`

@@ -25,15 +25,13 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 -----------------------------------------------------------------------
 */
 
+#include "astra/cuda/gpu_runtime_wrapper.h"
+
 #include "astra/cuda/3d/util3d.h"
 #include "astra/cuda/3d/dims3d.h"
 
 #include <cstdio>
 #include <cassert>
-#include <iostream>
-#include <list>
-
-#include <cuda.h>
 
 namespace astraCUDA3d {
 
@@ -54,7 +52,7 @@ struct DevConeParams {
 __constant__ DevConeParams gC_C[g_MaxAngles];
 
 //__launch_bounds__(32*16, 4)
-template<bool FDKWEIGHT, unsigned int ZSIZE>
+template<Cuda3DProjectionKernel KERNEL, unsigned int ZSIZE>
 __global__ void dev_cone_BP(void* D_volData, unsigned int volPitch,
                             cudaTextureObject_t tex,
                             int startAngle, int angleOffset,
@@ -104,7 +102,7 @@ __global__ void dev_cone_BP(void* D_volData, unsigned int volPitch,
 
 			float fUNum = fCu.w + fX * fCu.x + fY * fCu.y + fZ * fCu.z;
 			float fVNum = fCv.w + fX * fCv.x + fY * fCv.y + fZ * fCv.z;
-			float fDen  = (FDKWEIGHT ? 1.0f : fCd.w) + fX * fCd.x + fY * fCd.y + fZ * fCd.z;
+			float fDen  = ((KERNEL == ker3d_fdk_weighting) ? 1.0f : fCd.w) + fX * fCd.x + fY * fCd.y + fZ * fCd.z;
 
 			float fU,fV, fr;
 
@@ -114,7 +112,10 @@ __global__ void dev_cone_BP(void* D_volData, unsigned int volPitch,
 				fU = fUNum * fr;
 				fV = fVNum * fr;
 				float fVal = tex3D<float>(tex, fU, fAngle, fV);
-				Z[idx] += fr*fr*fVal;
+				if (KERNEL == ker3d_2d_weighting)
+					Z[idx] += fr*fVal;
+				else
+					Z[idx] += fr*fr*fVal;
 
 				fUNum += fCu.z;
 				fVNum += fCv.z;
@@ -128,7 +129,7 @@ __global__ void dev_cone_BP(void* D_volData, unsigned int volPitch,
 		endZ = dims.iVolZ - startZ;
 
 	for(int i=0; i < endZ; i++)
-		volData[((startZ+i)*dims.iVolY+Y)*volPitch+X] += Z[i] * fOutputScale;
+		volData[(size_t)((startZ+i)*dims.iVolY+Y)*volPitch+X] += Z[i] * fOutputScale;
 } //End kernel
 
 
@@ -211,14 +212,16 @@ __global__ void dev_cone_BP_SS(void* D_volData, unsigned int volPitch, cudaTextu
 
 		}
 
-		volData[(Z*dims.iVolY+Y)*volPitch+X] += fVal * fOutputScale;
+		volData[(size_t)(Z*dims.iVolY+Y)*volPitch+X] += fVal * fOutputScale;
 	}
 }
 
+using TransferConstantsBuffer = TransferConstantsBuffer_t<DevConeParams>;
 
-bool transferConstants(const SConeProjection* angles, unsigned int iProjAngles, const SProjectorParams3D& params)
+bool transferConstants(const SConeProjection* angles, unsigned int iProjAngles, const SProjectorParams3D& params,
+                       TransferConstantsBuffer& buf, cudaStream_t stream)
 {
-	DevConeParams *p = new DevConeParams[iProjAngles];
+	DevConeParams *p = &(std::get<0>(buf.d))[0];
 
 	// We need three things in the kernel:
 	// projected coordinates of pixels on the detector:
@@ -237,6 +240,10 @@ bool transferConstants(const SConeProjection* angles, unsigned int iProjAngles, 
 	// the square of the denominator equal to the relevant weighting factor.
 
 
+	// We use an event to assure that the previous transferConstants has completed before
+	// re-using the buffer. (Even if it is very unlikely that it hasn't.)
+	bool ok = checkCuda(cudaStreamWaitEvent(stream, buf.event, 0), "transferConstants wait");
+
 	for (unsigned int i = 0; i < iProjAngles; ++i) {
 		Vec3 u(angles[i].fDetUX, angles[i].fDetUY, angles[i].fDetUZ);
 		Vec3 v(angles[i].fDetVX, angles[i].fDetVY, angles[i].fDetVZ);
@@ -246,23 +253,31 @@ bool transferConstants(const SConeProjection* angles, unsigned int iProjAngles, 
 
 
 		double fScale;
-		if (!params.bFDKWeighting) {
+		if (params.projKernel == ker3d_fdk_weighting) {
+			// goal: 1/fDen = || u v s || / || u v (s-x) ||
+			// fDen = || u v (s-x) || / || u v s ||
+			// i.e., scale = 1 / || u v s ||
+
+			fScale = 1.0 / det3(u, v, s);
+		} else if (params.projKernel == ker3d_2d_weighting) {
+			// We set the weights here to approximate the adjoint
+			// of a 2d fanbeam kernel. To be used when only
+			// operating on a single slice.
+			// fDen = |cross(u,e_v)| || u v (s-x) || / || u v (s-d) ||
+			Vec3 ev(0, 0, 1);
+			fScale = scaled_cross3(u,ev,Vec3(params.volScale.fX,params.volScale.fY,params.volScale.fZ)).norm() / det3(u, v, s-d);
+
+		} else {
 			// goal: 1/fDen^2 = || u v (s-d) ||^2 / ( |cross(u,v)| * || u v (s-x) ||^2 )
 			// fDen = ( sqrt(|cross(u,v)|) * || u v (s-x) || ) / || u v (s-d) || 
-			// i.e. scale = sqrt(|cross(u,v)|) * / || u v (s-d) ||
+			// i.e. scale = sqrt(|cross(u,v)|) / || u v (s-d) ||
 
 
 			// NB: for cross(u,v) we invert the volume scaling (for the voxel
 			// size normalization) to get the proper dimensions for
 			// the scaling of the adjoint
 
-			fScale = sqrt(scaled_cross3(u,v,Vec3(params.fVolScaleX,params.fVolScaleY,params.fVolScaleZ)).norm()) / det3(u, v, s-d);
-		} else {
-			// goal: 1/fDen = || u v s || / || u v (s-x) ||
-			// fDen = || u v (s-x) || / || u v s ||
-			// i.e., scale = 1 / || u v s ||
-
-			fScale = 1.0 / det3(u, v, s);
+			fScale = sqrt(scaled_cross3(u,v,Vec3(params.volScale.fX,params.volScale.fY,params.volScale.fZ)).norm()) / det3(u, v, s-d);
 		}
 
 		p[i].fNumU.w = fScale * det3(s,v,d);
@@ -279,12 +294,11 @@ bool transferConstants(const SConeProjection* angles, unsigned int iProjAngles, 
 		p[i].fDen.z = -fScale * det3z(u, v);
 	}
 
-	// TODO: Check for errors
-	cudaMemcpyToSymbol(gC_C, p, iProjAngles*sizeof(DevConeParams), 0, cudaMemcpyHostToDevice);
+	ok &= checkCuda(cudaMemcpyToSymbolAsync(gC_C, p, iProjAngles*sizeof(DevConeParams), 0, cudaMemcpyHostToDevice, stream), "transferConstants transfer");
 
-	delete[] p;
+	ok &= checkCuda(cudaEventRecord(buf.event, stream), "transferConstants event");
 
-	return true;
+	return ok;
 }
 
 
@@ -293,16 +307,24 @@ bool ConeBP_Array(cudaPitchedPtr D_volumeData,
                   const SDimensions3D& dims, const SConeProjection* angles,
                   const SProjectorParams3D& params)
 {
+	TransferConstantsBuffer tcbuf(g_MaxAngles);
+
 	cudaTextureObject_t D_texObj;
 	if (!createTextureObject3D(D_projArray, D_texObj))
 		return false;
 
+	cudaStream_t stream;
+	if (!checkCuda(cudaStreamCreate(&stream), "ConeBP_Array stream")) {
+		cudaDestroyTextureObject(D_texObj);
+		return false;
+	}
+
 	float fOutputScale;
-	if (params.bFDKWeighting) {
+	if (params.projKernel == ker3d_fdk_weighting) {
 		// NB: assuming cube voxels here
-		fOutputScale = params.fOutputScale / (params.fVolScaleX);
+		fOutputScale = params.fOutputScale / (params.volScale.fX);
 	} else {
-		fOutputScale = params.fOutputScale * (params.fVolScaleX * params.fVolScaleY * params.fVolScaleZ);
+		fOutputScale = params.fOutputScale * (params.volScale.fX * params.volScale.fY * params.volScale.fZ);
 	}
 
 	bool ok = true;
@@ -312,7 +334,7 @@ bool ConeBP_Array(cudaPitchedPtr D_volumeData,
 		if (th + angleCount > dims.iProjAngles)
 			angleCount = dims.iProjAngles - th;
 
-		ok = transferConstants(angles, angleCount, params);
+		ok = transferConstants(angles, angleCount, params, tcbuf, stream);
 		if (!ok)
 			break;
 
@@ -325,33 +347,32 @@ bool ConeBP_Array(cudaPitchedPtr D_volumeData,
 
 		for (unsigned int i = 0; i < angleCount; i += g_anglesPerBlock) {
 		// printf("Calling BP: %d, %dx%d, %dx%d to %p\n", i, dimBlock.x, dimBlock.y, dimGrid.x, dimGrid.y, (void*)D_volumeData.ptr); 
-			if (params.bFDKWeighting) {
+			if (params.projKernel == ker3d_fdk_weighting) {
 				if (dims.iVolZ == 1) {
-					dev_cone_BP<true, 1><<<dimGrid, dimBlock>>>(D_volumeData.ptr, D_volumeData.pitch/sizeof(float), D_texObj, i, th, dims, fOutputScale);
+					dev_cone_BP<ker3d_fdk_weighting, 1><<<dimGrid, dimBlock, 0, stream>>>(D_volumeData.ptr, D_volumeData.pitch/sizeof(float), D_texObj, i, th, dims, fOutputScale);
 				} else {
-					dev_cone_BP<true, g_volBlockZ><<<dimGrid, dimBlock>>>(D_volumeData.ptr, D_volumeData.pitch/sizeof(float), D_texObj, i, th, dims, fOutputScale);
+					dev_cone_BP<ker3d_fdk_weighting, g_volBlockZ><<<dimGrid, dimBlock, 0, stream>>>(D_volumeData.ptr, D_volumeData.pitch/sizeof(float), D_texObj, i, th, dims, fOutputScale);
 				}
+			} else if (params.projKernel == ker3d_2d_weighting) {
+				dev_cone_BP<ker3d_2d_weighting, 1><<<dimGrid, dimBlock, 0, stream>>>(D_volumeData.ptr, D_volumeData.pitch/sizeof(float), D_texObj, i, th, dims, fOutputScale);
 			} else if (params.iRaysPerVoxelDim == 1) {
 				if (dims.iVolZ == 1) {
-					dev_cone_BP<false, 1><<<dimGrid, dimBlock>>>(D_volumeData.ptr, D_volumeData.pitch/sizeof(float), D_texObj, i, th, dims, fOutputScale);
+					dev_cone_BP<ker3d_default, 1><<<dimGrid, dimBlock, 0, stream>>>(D_volumeData.ptr, D_volumeData.pitch/sizeof(float), D_texObj, i, th, dims, fOutputScale);
 				} else {
-					dev_cone_BP<false, g_volBlockZ><<<dimGrid, dimBlock>>>(D_volumeData.ptr, D_volumeData.pitch/sizeof(float), D_texObj, i, th, dims, fOutputScale);
+					dev_cone_BP<ker3d_default, g_volBlockZ><<<dimGrid, dimBlock, 0, stream>>>(D_volumeData.ptr, D_volumeData.pitch/sizeof(float), D_texObj, i, th, dims, fOutputScale);
 				}
 			} else
-				dev_cone_BP_SS<<<dimGrid, dimBlock>>>(D_volumeData.ptr, D_volumeData.pitch/sizeof(float), D_texObj, i, th, dims, params.iRaysPerVoxelDim, fOutputScale);
+				dev_cone_BP_SS<<<dimGrid, dimBlock, 0, stream>>>(D_volumeData.ptr, D_volumeData.pitch/sizeof(float), D_texObj, i, th, dims, params.iRaysPerVoxelDim, fOutputScale);
 		}
-
-		// TODO: Consider not synchronizing here, if possible.
-		ok = checkCuda(cudaThreadSynchronize(), "cone_bp");
-		if (!ok)
-			break;
 
 		angles = angles + angleCount;
 		// printf("%f\n", toc(t));
-
 	}
 
+	ok = checkCuda(cudaStreamSynchronize(stream), "ConeBP sync");
+
 	cudaDestroyTextureObject(D_texObj);
+	cudaStreamDestroy(stream);
 
 	return ok;
 }
@@ -364,7 +385,13 @@ bool ConeBP(cudaPitchedPtr D_volumeData,
 	// transfer projections to array
 
 	cudaArray* cuArray = allocateProjectionArray(dims);
-	transferProjectionsToArray(D_projData, cuArray, dims);
+	if (!cuArray)
+		return false;
+	
+	if (!transferProjectionsToArray(D_projData, cuArray, dims)) {
+		cudaFreeArray(cuArray);
+		return false;
+	}
 
 	bool ret = ConeBP_Array(D_volumeData, cuArray, dims, angles, params);
 

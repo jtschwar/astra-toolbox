@@ -40,26 +40,25 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include <algorithm>
 #include <mex.h>
 
-#include <boost/any.hpp>
-
 #include "astra/Globals.h"
 #include "astra/Utilities.h"
 
 #include "astra/Config.h"
+#include "astra/XMLConfig.h"
 #include "astra/XMLDocument.h"
 #include "astra/XMLNode.h"
 
 // utility functions
+void mexErrMsgWithAstraLog(std::string message);
 std::string mexToString(const mxArray* pInput);
 bool mexIsScalar(const mxArray* pInput);
 void get3DMatrixDims(const mxArray* x, mwSize *dims);
 
-// convert boost::any into a MALTAB object
+// convert float vector into a MATLAB object
 mxArray* vectorToMxArray(std::vector<astra::float32> mInput);
-mxArray* anyToMxArray(boost::any _any);
 
 // turn a MATLAB struct into a Config object
-astra::Config* structToConfig(std::string rootname, const mxArray* pStruct);
+astra::XMLConfig* structToConfig(std::string rootname, const mxArray* pStruct);
 bool structToXMLNode(astra::XMLNode node, const mxArray* pStruct);
 bool optionsToXMLNode(astra::XMLNode node, const mxArray* pOptionStruct);
 std::map<std::string, mxArray*> parseStruct(const mxArray* pInput);

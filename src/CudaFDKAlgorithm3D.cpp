@@ -33,6 +33,9 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include "astra/ConeProjectionGeometry3D.h"
 #include "astra/ConeVecProjectionGeometry3D.h"
 #include "astra/CompositeGeometryManager.h"
+#include "astra/VolumeGeometry3D.h"
+
+#include "astra/Float32ProjectionData2D.h"
 
 #include "astra/Logging.h"
 #include "astra/Filters.h"
@@ -41,9 +44,6 @@ using namespace std;
 using namespace astraCUDA3d;
 
 namespace astra {
-
-// type of the algorithm, needed to register with CAlgorithmFactory
-std::string CCudaFDKAlgorithm3D::type = "FDK_CUDA";
 
 //----------------------------------------------------------------------------------------
 // Constructor
@@ -79,15 +79,15 @@ bool CCudaFDKAlgorithm3D::_check()
 	// check base class
 	ASTRA_CONFIG_CHECK(CReconstructionAlgorithm3D::_check(), "CUDA_FDK", "Error in ReconstructionAlgorithm3D initialization");
 
-	const CProjectionGeometry3D* projgeom = m_pSinogram->getGeometry();
-	ASTRA_CONFIG_CHECK(dynamic_cast<const CConeProjectionGeometry3D*>(projgeom) || dynamic_cast<const CConeVecProjectionGeometry3D*>(projgeom), "CUDA_FDK", "Error setting FDK geometry");
+	const CProjectionGeometry3D& projgeom = m_pSinogram->getGeometry();
+	ASTRA_CONFIG_CHECK(dynamic_cast<const CConeProjectionGeometry3D*>(&projgeom) || dynamic_cast<const CConeVecProjectionGeometry3D*>(&projgeom), "CUDA_FDK", "Error setting FDK geometry");
 
 
-	const CVolumeGeometry3D* volgeom = m_pReconstruction->getGeometry();
+	const CVolumeGeometry3D& volgeom = m_pReconstruction->getGeometry();
 	bool cube = true;
-	if (abs(volgeom->getPixelLengthX() / volgeom->getPixelLengthY() - 1.0) > 0.00001)
+	if (abs(volgeom.getPixelLengthX() / volgeom.getPixelLengthY() - 1.0) > 0.00001)
 		cube = false;
-	if (abs(volgeom->getPixelLengthX() / volgeom->getPixelLengthZ() - 1.0) > 0.00001)
+	if (abs(volgeom.getPixelLengthX() / volgeom.getPixelLengthZ() - 1.0) > 0.00001)
 		cube = false;
 	ASTRA_CONFIG_CHECK(cube, "CUDA_FDK", "Voxels must be cubes for FDK");
 
@@ -118,8 +118,7 @@ void CCudaFDKAlgorithm3D::initializeFromProjector()
 // Initialize - Config
 bool CCudaFDKAlgorithm3D::initialize(const Config& _cfg)
 {
-	ASTRA_ASSERT(_cfg.self);
-	ConfigStackCheck<CAlgorithm> CC("CudaFDKAlgorithm3D", this, _cfg);
+	ConfigReader<CAlgorithm> CR("CudaFDKAlgorithm3D", this, _cfg);
 
 	// if already initialized, clear first
 	if (m_bIsInitialized) {
@@ -134,40 +133,25 @@ bool CCudaFDKAlgorithm3D::initialize(const Config& _cfg)
 	initializeFromProjector();
 
 	// Deprecated options
-	m_iVoxelSuperSampling = (int)_cfg.self.getOptionNumerical("VoxelSuperSampling", m_iVoxelSuperSampling);
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUindex", m_iGPUIndex);
-	m_iGPUIndex = (int)_cfg.self.getOptionNumerical("GPUIndex", m_iGPUIndex);
-	CC.markOptionParsed("VoxelSuperSampling");
-	CC.markOptionParsed("GPUIndex");
-	if (!_cfg.self.hasOption("GPUIndex"))
-		CC.markOptionParsed("GPUindex");
-	
-	// filter
-	if (_cfg.self.hasOption("FilterSinogramId")){
-		m_iFilterDataId = (int)_cfg.self.getOptionInt("FilterSinogramId");
-		const CFloat32ProjectionData2D * pFilterData = dynamic_cast<CFloat32ProjectionData2D*>(CData2DManager::getSingleton().get(m_iFilterDataId));
-		if (!pFilterData){
-			ASTRA_ERROR("Incorrect FilterSinogramId");
-			return false;
-		}
-		const CProjectionGeometry3D* projgeom = m_pSinogram->getGeometry();
-		const CProjectionGeometry2D* filtgeom = pFilterData->getGeometry();
-		int iPaddedDetCount = calcNextPowerOfTwo(2 * projgeom->getDetectorColCount());
-		int iHalfFFTSize = calcFFTFourierSize(iPaddedDetCount);
-		if(filtgeom->getDetectorCount()!=iHalfFFTSize || filtgeom->getProjectionAngleCount()!=projgeom->getProjectionCount()){
-			ASTRA_ERROR("Filter size does not match required size (%i angles, %i detectors)",projgeom->getProjectionCount(),iHalfFFTSize);
-			return false;
-		}
-	}else
+	bool ok = true;
+	ok &= CR.getOptionInt("VoxelSuperSampling", m_iVoxelSuperSampling, m_iVoxelSuperSampling);
+	if (CR.hasOption("GPUIndex"))
+		ok &= CR.getOptionInt("GPUIndex", m_iGPUIndex, m_iGPUIndex);
+	else
+		ok &= CR.getOptionInt("GPUindex", m_iGPUIndex, m_iGPUIndex);
+	if (!ok)
+		return false;
+
+	if ((CR.has("FilterSinogramId") || CR.hasOption("FilterSinogramId")) &&
+	    !(CR.has("FilterType") || CR.hasOption("FilterType")))
 	{
-		m_iFilterDataId = -1;
+		ASTRA_WARN("Setting FilterSinogramId without FilterType is no longer supported. Set FilterType to 'sinogram' for the old behaviour.");
 	}
-	CC.markOptionParsed("FilterSinogramId");
+	m_filterConfig = getFilterConfigForAlgorithm(_cfg, this);
 
-
-
-	m_bShortScan = _cfg.self.getOptionBool("ShortScan", false);
-	CC.markOptionParsed("ShortScan");
+	ok &= CR.getOptionBool("ShortScan", m_bShortScan, false);
+	if (!ok)
+		return false;
 
 	// success
 	m_bIsInitialized = _check();
@@ -195,24 +179,9 @@ bool CCudaFDKAlgorithm3D::initialize(CProjector3D* _pProjector,
 	return m_bIsInitialized;
 }
 
-//---------------------------------------------------------------------------------------
-// Information - All
-map<string,boost::any> CCudaFDKAlgorithm3D::getInformation() 
-{
-	map<string, boost::any> res;
-	return mergeMap<string,boost::any>(CAlgorithm::getInformation(), res);
-};
-
-//---------------------------------------------------------------------------------------
-// Information - Specific
-boost::any CCudaFDKAlgorithm3D::getInformation(std::string _sIdentifier) 
-{
-	return CAlgorithm::getInformation(_sIdentifier);
-};
-
 //----------------------------------------------------------------------------------------
 // Iterate
-void CCudaFDKAlgorithm3D::run(int _iNrIterations)
+bool CCudaFDKAlgorithm3D::run(int _iNrIterations)
 {
 	// check initialized
 	ASTRA_ASSERT(m_bIsInitialized);
@@ -221,13 +190,6 @@ void CCudaFDKAlgorithm3D::run(int _iNrIterations)
 	ASTRA_ASSERT(pSinoMem);
 	CFloat32VolumeData3D* pReconMem = dynamic_cast<CFloat32VolumeData3D*>(m_pReconstruction);
 	ASTRA_ASSERT(pReconMem);
-
-	const float *filter = NULL;
-	if (m_iFilterDataId != -1) {
-		const CFloat32ProjectionData2D *pFilterData = dynamic_cast<CFloat32ProjectionData2D*>(CData2DManager::getSingleton().get(m_iFilterDataId));
-		if (pFilterData)
-			filter = pFilterData->getDataConst();
-	}
 
 #if 0
 	bool ok = true;
@@ -241,10 +203,7 @@ void CCudaFDKAlgorithm3D::run(int _iNrIterations)
 
 	CCompositeGeometryManager cgm;
 
-	cgm.doFDK(m_pProjector, pReconMem, pSinoMem, m_bShortScan, filter);
-
-
-
+	return cgm.doFDK(m_pProjector, pReconMem, pSinoMem, m_bShortScan, m_filterConfig);
 }
 //----------------------------------------------------------------------------------------
 

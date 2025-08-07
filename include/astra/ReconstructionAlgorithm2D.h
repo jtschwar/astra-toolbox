@@ -112,19 +112,6 @@ public:
 	 */
 	void setSinogramMask(CFloat32ProjectionData2D* _pMask, bool _bEnable = true);
 
-	/** Get all information parameters.
-	 *
-	 * @return map with all boost::any object
-	 */
-	virtual std::map<std::string,boost::any> getInformation();
-
-	/** Get a single piece of information.
-	 *
-	 * @param _sIdentifier identifier string to specify which piece of information you want
-	 * @return boost::any object
-	 */
-	virtual boost::any getInformation(std::string _sIdentifier);
-
 	/** Get projector object
 	 *
 	 * @return projector
@@ -153,7 +140,7 @@ public:
 	 *
 	 * @param _iNrIterations amount of iterations to perform.
 	 */
-	virtual void run(int _iNrIterations = 0) = 0;
+	virtual bool run(int _iNrIterations = 0) = 0;
 
 	/** Get a description of the class.
 	 *

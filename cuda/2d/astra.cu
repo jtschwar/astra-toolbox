@@ -25,6 +25,8 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 -----------------------------------------------------------------------
 */
 
+#include "astra/cuda/gpu_runtime_wrapper.h"
+
 #include "astra/cuda/2d/util.h"
 #include "astra/cuda/2d/par_fp.h"
 #include "astra/cuda/2d/fan_fp.h"
@@ -48,8 +50,6 @@ along with the ASTRA Toolbox. If not, see <http://www.gnu.org/licenses/>.
 #include <cstdio>
 #include <cassert>
 #include <fstream>
-
-#include <cuda.h>
 
 using namespace astraCUDA;
 using namespace std;
@@ -510,15 +510,14 @@ _AstraExport std::string getCudaDeviceString(int device)
 	}
 
 	long mem = prop.totalGlobalMem / (1024*1024);
-	snprintf(buf, 1024, "GPU #%d: %s, with %ldMB", device, prop.name, mem);
+	snprintf(buf, 1024, "GPU #%d: %s, with %ldMB, CUDA compute capability %d.%d", device, prop.name, mem, prop.major, prop.minor);
 	return buf;
 }
 
 _AstraExport bool setGPUIndex(int iGPUIndex)
 {
         if (iGPUIndex != -1) {
-                cudaSetDevice(iGPUIndex);
-                cudaError_t err = cudaGetLastError();
+                cudaError_t err = cudaSetDevice(iGPUIndex);
 
                 // Ignore errors caused by calling cudaSetDevice multiple times
                 if (err != cudaSuccess && err != cudaErrorSetOnActiveProcess)
